@@ -88,6 +88,8 @@ def test_configures_workload_and_publishes_wildcard_route() -> None:
             "port": 32080,
         },
     }
+    unit_data = harness.get_relation_data(relation_id, harness.model.unit.name)
+    assert json.loads(unit_data["address"]) == "10.0.0.10"
     service = client.apply.call_args.args[0]
     assert service.spec.selector == {"app.kubernetes.io/name": "demos-controller"}
     assert service.spec.type == "NodePort"

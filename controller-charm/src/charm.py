@@ -164,6 +164,9 @@ class DemosControllerCharm(ops.CharmBase):
                     for key, value in data.items()
                 }
             )
+            relation.data[self.unit]["address"] = json.dumps(
+                str(self.model.get_binding(relation).network.bind_address)
+            )
         return True
 
     def _remove(self, _: ops.RemoveEvent) -> None:
