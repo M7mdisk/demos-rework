@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 
 import ops
-from kubernetes import KubernetesAdapter, KubernetesPermissionError
 from lightkube import ApiError, Client
 from ops import pebble
+
+from kubernetes import KubernetesAdapter, KubernetesPermissionError
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +56,7 @@ class DemosControllerCharm(ops.CharmBase):
                 return None
         except (TypeError, json.JSONDecodeError):
             return None
-        return {
+        environment = {
             "DATABASE_PATH": "/data/controller.db",
             "KUBERNETES_NAMESPACE": self.model.name,
             "CONTROLLER_OWNER": self.app.name,
@@ -80,6 +82,14 @@ class DemosControllerCharm(ops.CharmBase):
             "SIGNATURE_MAX_AGE": str(self.config["signature-max-age"]),
             "RATE_LIMIT_PER_MINUTE": str(self.config["rate-limit-per-minute"]),
         }
+        for juju_name, standard_name in (
+            ("JUJU_CHARM_HTTP_PROXY", "HTTP_PROXY"),
+            ("JUJU_CHARM_HTTPS_PROXY", "HTTPS_PROXY"),
+            ("JUJU_CHARM_NO_PROXY", "NO_PROXY"),
+        ):
+            if value := os.getenv(juju_name):
+                environment[standard_name] = value
+        return environment
 
     def _configure(self, _: ops.EventBase) -> None:
         environment = self._environment()
@@ -146,7 +156,8 @@ class DemosControllerCharm(ops.CharmBase):
             "ports": [endpoint.port],
             "protocol": "http",
             "hosts": endpoint.hosts,
-            "hostname": f"*.{suffix}",
+            "hostname": str(self.config["api-hostname"]).strip("."),
+            "additional_hostnames": [f"*.{suffix}"],
             "paths": ["/"],
             "check": {
                 "interval": 10,
@@ -190,7 +201,8 @@ class DemosControllerCharm(ops.CharmBase):
         suffix = str(self.config["hostname-suffix"]).strip(".")
         event.set_results(
             {
-                "hostname": f"*.{suffix}",
+                "api-url": f"https://{str(self.config['api-hostname']).strip('.')}",
+                "demo-hostname": f"*.{suffix}",
                 "service": f"{self.app.name}.{self.model.name}.svc.cluster.local:8080",
             }
         )

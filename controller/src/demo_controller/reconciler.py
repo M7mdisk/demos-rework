@@ -93,8 +93,12 @@ class ReconciliationLoop:
                 else str(error)
             )
             self.store.update_state(record.repository, record.pr, "failed", message)
-        except Exception:
+        except Exception as error:
             logger.exception("Reconciliation failed for %s#%d", record.repository, record.pr)
+            detail = f"{type(error).__name__}: {str(error)[:300]}"
             self.store.update_state(
-                record.repository, record.pr, "failed", "Kubernetes reconciliation failed"
+                record.repository,
+                record.pr,
+                "failed",
+                f"Kubernetes reconciliation failed ({detail})",
             )

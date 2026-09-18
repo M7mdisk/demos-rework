@@ -1,12 +1,14 @@
 # Canonical demos controller charm
 
 Deploy this Kubernetes charm with `--trust`, attach persistent `state` storage,
-and relate `haproxy-route` to the existing HAProxy offer. Configure
+and relate `haproxy-route` to the existing HAProxy offer. The route publishes
+the exact `api-hostname` plus the wildcard beneath `hostname-suffix`. Configure
 `vault-approle-secret` with a Juju user secret containing `role-id` and
 `secret-id`. Configure `hmac-credentials-secret` with a `credentials` key whose
 value is a JSON map from lowercase `owner/repository` identities to HMAC keys.
 
-The charm publishes `*.demos.canonical.com` (configurable) to its port 8080.
+By default, the charm publishes `demos-controller.canonical.com` and
+`*.demos.canonical.com` to its port 8080.
 Because HAProxy runs outside the Kubernetes model, the charm creates an owned
 NodePort Service selecting the Juju application pods and publishes Kubernetes
 node `InternalIP` addresses plus the allocated NodePort through JSON-encoded

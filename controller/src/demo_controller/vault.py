@@ -79,7 +79,13 @@ class VaultClient:
                 response.raise_for_status()
                 self._set_token(response.json()["auth"])
             except (httpx.HTTPError, KeyError, TypeError, ValueError) as error:
-                raise VaultError("Vault authentication failed") from error
+                detail = type(error).__name__
+                if isinstance(error, httpx.HTTPStatusError):
+                    detail = f"HTTP {error.response.status_code}"
+                elif str(error):
+                    detail = f"{detail}: {str(error)[:200]}"
+                logger.warning("Vault authentication failed: %s", detail)
+                raise VaultError(f"Vault authentication failed ({detail})") from error
 
     def _set_token(self, auth: dict[str, Any]) -> None:
         token = auth.get("client_token")

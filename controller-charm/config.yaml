@@ -1,4 +1,8 @@
 options:
+  api-hostname:
+    type: string
+    default: demos-controller.canonical.com
+    description: Public hostname for the controller API and health endpoints.
   hostname-suffix:
     type: string
     default: demos.canonical.com

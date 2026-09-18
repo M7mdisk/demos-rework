@@ -6,15 +6,16 @@ from unittest.mock import MagicMock, patch
 
 import ops
 import pytest
+from lightkube import ApiError
+from lightkube.resources.core_v1 import Service
+from ops.testing import Harness
+
 from charm import DemosControllerCharm
 from kubernetes import (
     MANAGED_BY_LABEL,
     OWNER_ANNOTATION,
     KubernetesAdapter,
 )
-from lightkube import ApiError
-from lightkube.resources.core_v1 import Service
-from ops.testing import Harness
 
 ROOT = Path(__file__).parents[1]
 
@@ -52,7 +53,10 @@ def test_missing_secrets_blocks_charm() -> None:
     harness.cleanup()
 
 
-def test_configures_workload_and_publishes_wildcard_route() -> None:
+def test_configures_workload_and_publishes_api_and_wildcard_route(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("JUJU_CHARM_HTTPS_PROXY", "http://egress.internal:3128")
     client = nodeport_client()
     harness = make_harness(client)
     harness.set_leader(True)
@@ -72,13 +76,18 @@ def test_configures_workload_and_publishes_wildcard_route() -> None:
     )
     assert plan.services["fastapi"].environment["UVICORN_HOST"] == "0.0.0.0"
     assert plan.services["fastapi"].environment["UVICORN_PORT"] == "8080"
+    assert (
+        plan.services["fastapi"].environment["HTTPS_PROXY"]
+        == "http://egress.internal:3128"
+    )
     data = harness.get_relation_data(relation_id, harness.model.app.name)
     assert {key: json.loads(value) for key, value in data.items()} == {
         "service": "demos-controller-nodeport",
         "ports": [32080],
         "protocol": "http",
         "hosts": ["10.10.0.2"],
-        "hostname": "*.demos.canonical.com",
+        "hostname": "demos-controller.canonical.com",
+        "additional_hostnames": ["*.demos.canonical.com"],
         "paths": ["/"],
         "check": {
             "interval": 10,
