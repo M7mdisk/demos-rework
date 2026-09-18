@@ -1,0 +1,29 @@
+name: demos-fixture
+base: ubuntu@24.04
+build-base: ubuntu@24.04
+version: "1.0"
+summary: Minimal Pebble-managed fixture for the demos controller
+description: |
+  A dependency-free HTTP service used to exercise demo deployment, updates,
+  environment projection, readiness, and cleanup.
+license: Apache-2.0
+run-user: _daemon_
+platforms:
+  amd64:
+
+services:
+  demo:
+    override: replace
+    command: /usr/bin/python3 /app/app.py
+    startup: enabled
+    environment:
+      PORT: "8000"
+
+parts:
+  app:
+    plugin: nil
+    source: .
+    stage-packages:
+      - python3
+    override-build: |
+      install -Dm755 app.py "${CRAFT_PART_INSTALL}/app/app.py"

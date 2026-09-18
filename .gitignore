@@ -1,0 +1,19 @@
+# Local reference material and original migration inputs
+/references/
+/start-demo.sh
+/task.md
+
+# Build artifacts
+*.charm
+*.rock
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+
+# Local test output
+.demo-result.json

@@ -1,0 +1,51 @@
+options:
+  hostname-suffix:
+    type: string
+    default: demos.canonical.com
+    description: Public DNS suffix; the charm advertises a wildcard beneath it.
+  image-registry:
+    type: string
+    default: ghcr.io
+    description: Registry hostname authorized for repository-scoped immutable images.
+  vault-address:
+    type: string
+    default: https://vault.ps7.admin.canonical.com
+    description: HTTPS address of the externally managed Vault.
+  vault-namespace:
+    type: string
+    default: ""
+    description: Optional Vault Enterprise namespace.
+  vault-kv-mount:
+    type: string
+    default: secret
+    description: Vault KV v2 mount name.
+  vault-base-path:
+    type: string
+    default: demos
+    description: Base path containing versioned per-repository records.
+  vault-approle-secret:
+    type: secret
+    description: Juju secret URI containing role-id and secret-id keys.
+  hmac-credentials-secret:
+    type: secret
+    description: Juju secret URI containing a credentials JSON object.
+  max-demo-lifetime:
+    type: int
+    default: 604800
+    description: Maximum lifetime of a demo in seconds.
+  reconcile-interval:
+    type: int
+    default: 10
+    description: Desired-state reconciliation interval in seconds.
+  request-max-bytes:
+    type: int
+    default: 65536
+    description: Maximum deployment API request body size.
+  signature-max-age:
+    type: int
+    default: 300
+    description: Maximum HMAC signature age in seconds.
+  rate-limit-per-minute:
+    type: int
+    default: 60
+    description: Maximum authenticated API requests per repository per minute.

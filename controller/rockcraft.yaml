@@ -1,0 +1,13 @@
+name: demo-controller
+summary: PR demo deployment controller
+description: |
+  Long-running API, Kubernetes reconciler, Vault client, and host-based reverse
+  proxy used by the Canonical demos controller charm.
+version: "0.1.0"
+base: ubuntu@24.04
+build-base: ubuntu@24.04
+platforms:
+  amd64:
+  arm64:
+extensions:
+  - fastapi-framework

@@ -1,0 +1,27 @@
+name: demos-controller
+display-name: Canonical demos controller
+summary: Reconciles and proxies ephemeral pull-request demos
+description: |
+  Runs an authenticated API and reverse proxy, resolving project configuration
+  from Vault and reconciling controller-owned Kubernetes resources.
+assumes:
+  - k8s-api
+containers:
+  controller:
+    resource: controller-image
+    mounts:
+      - storage: state
+        location: /data
+resources:
+  controller-image:
+    type: oci-image
+    description: OCI image for the demos controller workload
+storage:
+  state:
+    type: filesystem
+    location: /data
+    minimum-size: 1G
+requires:
+  haproxy-route:
+    interface: haproxy-route
+    limit: 1

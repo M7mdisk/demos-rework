@@ -1,0 +1,4 @@
+reconcile:
+  description: Restart the controller service to trigger immediate recovery reconciliation.
+show-endpoint:
+  description: Show the wildcard hostname and in-model controller service endpoint.

@@ -1,0 +1,1 @@
+"""Canonical PR demo controller."""
