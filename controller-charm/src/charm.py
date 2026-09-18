@@ -6,10 +6,9 @@ import logging
 import os
 
 import ops
+from kubernetes import KubernetesAdapter, KubernetesPermissionError
 from lightkube import ApiError, Client
 from ops import pebble
-
-from kubernetes import KubernetesAdapter, KubernetesPermissionError
 
 logger = logging.getLogger(__name__)
 
@@ -85,10 +84,16 @@ class DemosControllerCharm(ops.CharmBase):
         for juju_name, standard_name in (
             ("JUJU_CHARM_HTTP_PROXY", "HTTP_PROXY"),
             ("JUJU_CHARM_HTTPS_PROXY", "HTTPS_PROXY"),
-            ("JUJU_CHARM_NO_PROXY", "NO_PROXY"),
         ):
             if value := os.getenv(juju_name):
                 environment[standard_name] = value
+        no_proxy = [
+            item for item in os.getenv("JUJU_CHARM_NO_PROXY", "").split(",") if item
+        ]
+        if kubernetes_service_host := os.getenv("KUBERNETES_SERVICE_HOST"):
+            no_proxy.append(kubernetes_service_host)
+        if no_proxy:
+            environment["NO_PROXY"] = ",".join(dict.fromkeys(no_proxy))
         return environment
 
     def _configure(self, _: ops.EventBase) -> None:
