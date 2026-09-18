@@ -60,10 +60,7 @@ class DemosControllerCharm(ops.CharmBase):
             "KUBERNETES_NAMESPACE": self.model.name,
             "CONTROLLER_OWNER": self.app.name,
             "HOSTNAME_SUFFIX": str(self.config["hostname-suffix"]).strip("."),
-            "IMAGE_REGISTRY": str(self.config["image-registry"])
-            .strip()
-            .strip("/")
-            .lower(),
+            "IMAGE_REGISTRY": str(self.config["image-registry"]).strip().strip("/").lower(),
             "UVICORN_HOST": "0.0.0.0",
             "UVICORN_PORT": "8080",
             "VAULT_ADDRESS": str(self.config["vault-address"]),
@@ -72,9 +69,7 @@ class DemosControllerCharm(ops.CharmBase):
             "VAULT_BASE_PATH": str(self.config["vault-base-path"]),
             "VAULT_ROLE_ID": approle["role-id"],
             "VAULT_SECRET_ID": approle["secret-id"],
-            "HMAC_CREDENTIALS": json.dumps(
-                credentials, separators=(",", ":"), sort_keys=True
-            ),
+            "HMAC_CREDENTIALS": json.dumps(credentials, separators=(",", ":"), sort_keys=True),
             "MAX_DEMO_LIFETIME": str(self.config["max-demo-lifetime"]),
             "RECONCILE_INTERVAL": str(self.config["reconcile-interval"]),
             "REQUEST_MAX_BYTES": str(self.config["request-max-bytes"]),
@@ -87,9 +82,7 @@ class DemosControllerCharm(ops.CharmBase):
         ):
             if value := os.getenv(juju_name):
                 environment[standard_name] = value
-        no_proxy = [
-            item for item in os.getenv("JUJU_CHARM_NO_PROXY", "").split(",") if item
-        ]
+        no_proxy = [item for item in os.getenv("JUJU_CHARM_NO_PROXY", "").split(",") if item]
         if kubernetes_service_host := os.getenv("KUBERNETES_SERVICE_HOST"):
             no_proxy.append(kubernetes_service_host)
         if no_proxy:
@@ -99,9 +92,7 @@ class DemosControllerCharm(ops.CharmBase):
     def _configure(self, _: ops.EventBase) -> None:
         environment = self._environment()
         if not environment:
-            self.unit.status = ops.BlockedStatus(
-                "configure Vault AppRole and HMAC secrets"
-            )
+            self.unit.status = ops.BlockedStatus("configure Vault AppRole and HMAC secrets")
             return
         if not self.container.can_connect():
             self.unit.status = ops.WaitingStatus("waiting for controller container")
@@ -175,10 +166,7 @@ class DemosControllerCharm(ops.CharmBase):
         for relation in self.model.relations["haproxy-route"]:
             relation.data[self.app].clear()
             relation.data[self.app].update(
-                {
-                    key: json.dumps(value, separators=(",", ":"))
-                    for key, value in data.items()
-                }
+                {key: json.dumps(value, separators=(",", ":")) for key, value in data.items()}
             )
             relation.data[self.unit]["address"] = json.dumps(
                 str(self.model.get_binding(relation).network.bind_address)
@@ -198,9 +186,7 @@ class DemosControllerCharm(ops.CharmBase):
             event.fail("controller container is unavailable")
             return
         self.container.restart(self._SERVICE)
-        event.set_results(
-            {"result": "controller restarted; reconciliation will resume"}
-        )
+        event.set_results({"result": "controller restarted; reconciliation will resume"})
 
     def _show_endpoint_action(self, event: ops.ActionEvent) -> None:
         suffix = str(self.config["hostname-suffix"]).strip(".")
@@ -215,21 +201,15 @@ class DemosControllerCharm(ops.CharmBase):
     def _update_status(self, _: ops.UpdateStatusEvent) -> None:
         environment = self._environment()
         if not environment:
-            self.unit.status = ops.BlockedStatus(
-                "configure Vault AppRole and HMAC secrets"
-            )
+            self.unit.status = ops.BlockedStatus("configure Vault AppRole and HMAC secrets")
         elif not self.container.can_connect():
             self.unit.status = ops.WaitingStatus("waiting for controller container")
         else:
             services = self.container.get_services(self._SERVICE)
             if not services or not services[self._SERVICE].is_running():
-                self.unit.status = ops.MaintenanceStatus(
-                    "controller service is not running"
-                )
+                self.unit.status = ops.MaintenanceStatus("controller service is not running")
             elif not self.model.relations["haproxy-route"]:
-                self.unit.status = ops.WaitingStatus(
-                    "waiting for haproxy-route relation"
-                )
+                self.unit.status = ops.WaitingStatus("waiting for haproxy-route relation")
             elif self.unit.is_leader() and not self._publish_route(None):
                 return
             else:

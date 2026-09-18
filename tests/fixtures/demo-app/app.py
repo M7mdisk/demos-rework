@@ -22,9 +22,7 @@ class Handler(BaseHTTPRequestHandler):
         self._json(
             200,
             {
-                "message": os.environ.get(
-                    "PLAIN_MESSAGE", "hello from the demo fixture"
-                ),
+                "message": os.environ.get("PLAIN_MESSAGE", "hello from the demo fixture"),
                 "revision": os.environ.get("DEMO_REVISION", "local"),
                 "secret_configured": bool(secret),
                 "secret_fingerprint": hashlib.sha256(secret.encode()).hexdigest()[:12]

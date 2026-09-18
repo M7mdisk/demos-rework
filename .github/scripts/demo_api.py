@@ -84,22 +84,16 @@ def request(
             error.code,
         ) from error
     except urllib.error.URLError as error:
-        raise ApiError(
-            f"{method.upper()} {request_target} failed: {error.reason}"
-        ) from error
+        raise ApiError(f"{method.upper()} {request_target} failed: {error.reason}") from error
 
     if not response_body:
         return {}
     try:
         result = json.loads(response_body)
     except json.JSONDecodeError as error:
-        raise ApiError(
-            f"{method.upper()} {request_target} returned invalid JSON"
-        ) from error
+        raise ApiError(f"{method.upper()} {request_target} returned invalid JSON") from error
     if not isinstance(result, dict):
-        raise ApiError(
-            f"{method.upper()} {request_target} returned a non-object JSON response"
-        )
+        raise ApiError(f"{method.upper()} {request_target} returned a non-object JSON response")
     return result
 
 
@@ -151,9 +145,7 @@ def poll(
                 find_value(last, {"error", "message", "detail"})
                 or f"Controller reported terminal state {state}"
             )
-        if state in TERMINAL_SUCCESS and (
-            not desired_absence or state in {"deleted", "destroyed"}
-        ):
+        if state in TERMINAL_SUCCESS and (not desired_absence or state in {"deleted", "destroyed"}):
             return last
         time.sleep(args.interval)
     raise ApiError(

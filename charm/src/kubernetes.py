@@ -55,9 +55,7 @@ class KubernetesAdapter:
         )
         try:
             self.client.apply(service, field_manager=self.app_name, force=True)
-            current = self.client.get(
-                Service, name=self.service_name, namespace=self.namespace
-            )
+            current = self.client.get(Service, name=self.service_name, namespace=self.namespace)
             nodes = self.client.list(Node)
         except ApiError as error:
             self._raise_for_api_error(error)
@@ -81,14 +79,10 @@ class KubernetesAdapter:
 
     def cleanup(self) -> None:
         try:
-            service = self.client.get(
-                Service, name=self.service_name, namespace=self.namespace
-            )
+            service = self.client.get(Service, name=self.service_name, namespace=self.namespace)
             annotations = service.metadata.annotations if service.metadata else None
             if annotations and annotations.get(OWNER_ANNOTATION) == self.app_name:
-                self.client.delete(
-                    Service, name=self.service_name, namespace=self.namespace
-                )
+                self.client.delete(Service, name=self.service_name, namespace=self.namespace)
         except ApiError as error:
             if error.status.code == 404:
                 return

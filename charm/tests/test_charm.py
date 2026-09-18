@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 
 import ops
 import pytest
-from charm import DemosControllerCharm
 from kubernetes import (
     MANAGED_BY_LABEL,
     OWNER_ANNOTATION,
@@ -15,6 +14,8 @@ from kubernetes import (
 from lightkube import ApiError
 from lightkube.resources.core_v1 import Service
 from ops.testing import Harness
+
+from charm import DemosControllerCharm
 
 ROOT = Path(__file__).parents[1]
 
@@ -72,18 +73,11 @@ def test_configures_workload_and_publishes_api_and_wildcard_route(
     ):
         harness.container_pebble_ready("controller")
     plan = harness.get_container_pebble_plan("controller")
-    assert (
-        plan.services["fastapi"].environment["DATABASE_PATH"] == "/data/controller.db"
-    )
+    assert plan.services["fastapi"].environment["DATABASE_PATH"] == "/data/controller.db"
     assert plan.services["fastapi"].environment["UVICORN_HOST"] == "0.0.0.0"
     assert plan.services["fastapi"].environment["UVICORN_PORT"] == "8080"
-    assert (
-        plan.services["fastapi"].environment["HTTPS_PROXY"]
-        == "http://egress.internal:3128"
-    )
-    assert (
-        plan.services["fastapi"].environment["NO_PROXY"] == "localhost,.svc,10.86.0.1"
-    )
+    assert plan.services["fastapi"].environment["HTTPS_PROXY"] == "http://egress.internal:3128"
+    assert plan.services["fastapi"].environment["NO_PROXY"] == "localhost,.svc,10.86.0.1"
     data = harness.get_relation_data(relation_id, harness.model.app.name)
     assert {key: json.loads(value) for key, value in data.items()} == {
         "service": "demos-controller-nodeport",
