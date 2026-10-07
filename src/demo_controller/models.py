@@ -98,7 +98,6 @@ class ProjectConfig(StrictModel):
     health_path: str = "/"
     resources: ResourceValues = Field(default_factory=ResourceValues)
     image_namespace: str | None = None
-    lifetime_seconds: Annotated[int | None, Field(ge=300, le=2_592_000)] = None
 
     @field_validator("environment", "secrets")
     @classmethod

@@ -80,9 +80,7 @@ def create_app(
         if request.headers.get("X-Demos-Nonce") != payload.delivery_id:
             raise HTTPException(400, "nonce must equal delivery_id")
         try:
-            record, _ = store.upsert_deploy(
-                payload, request_hash(body), settings.max_demo_lifetime_seconds
-            )
+            record, _ = store.upsert_deploy(payload, request_hash(body))
         except ValueError as error:
             raise HTTPException(409, str(error)) from error
         return JSONResponse(store.status(record).model_dump(), status_code=202)

@@ -20,7 +20,6 @@ class ReconciliationLoop:
         namespace: str,
         owner: str,
         image_registry: str,
-        default_lifetime: int,
         interval: float,
     ):
         self.store = store
@@ -29,7 +28,6 @@ class ReconciliationLoop:
         self.namespace = namespace
         self.owner = owner
         self.image_registry = image_registry
-        self.default_lifetime = default_lifetime
         self.interval = interval
         self._stopping = asyncio.Event()
 
@@ -72,10 +70,6 @@ class ReconciliationLoop:
                 record, project.config, project.version, self.namespace, self.owner
             )
             ready = await asyncio.to_thread(self.kubernetes.apply, rendered)
-            lifetime = min(
-                project.config.lifetime_seconds or self.default_lifetime,
-                self.default_lifetime,
-            )
             self.store.update_state(
                 record.repository,
                 record.pr,
@@ -83,7 +77,6 @@ class ReconciliationLoop:
                 "deployment is ready" if ready else "waiting for deployment readiness",
                 vault_version=project.version,
                 port=project.config.port,
-                lifetime_seconds=lifetime if record.vault_version is None else None,
             )
         except VaultError as error:
             logger.warning("Vault reconciliation failed for %s#%d", record.repository, record.pr)

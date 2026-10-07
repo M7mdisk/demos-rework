@@ -55,7 +55,7 @@ async def test_vault_outage_keeps_existing_ready_demo_routable(tmp_path: Path) -
         image=f"ghcr.io/canonical/example@sha256:{'b' * 64}",
         delivery_id="delivery-8",
     )
-    store.upsert_deploy(request, "request-hash", 3600)
+    store.upsert_deploy(request, "request-hash")
     store.update_state(
         request.repository,
         request.pr,
@@ -73,7 +73,6 @@ async def test_vault_outage_keeps_existing_ready_demo_routable(tmp_path: Path) -
         "testing",
         "controller",
         "ghcr.io",
-        3600,
         10,
     )
 
@@ -98,7 +97,7 @@ async def test_vault_image_namespace_accepts_repository_digest(tmp_path: Path) -
         image=f"localhost:32000/canonical/example@sha256:{'b' * 64}",
         delivery_id="delivery-9",
     )
-    store.upsert_deploy(request, "request-hash", 3600)
+    store.upsert_deploy(request, "request-hash")
     record = store.get(request.repository, request.pr)
     assert record is not None
     kubernetes = ApplyingKubernetes()
@@ -109,7 +108,6 @@ async def test_vault_image_namespace_accepts_repository_digest(tmp_path: Path) -
         "testing",
         "controller",
         "localhost:32000",
-        3600,
         10,
     )
 

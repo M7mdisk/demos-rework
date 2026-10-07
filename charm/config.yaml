@@ -33,10 +33,6 @@ options:
   hmac-credentials-secret:
     type: secret
     description: Juju secret URI containing a credentials JSON object.
-  max-demo-lifetime:
-    type: int
-    default: 604800
-    description: Maximum lifetime of a demo in seconds.
   reconcile-interval:
     type: int
     default: 10

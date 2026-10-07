@@ -11,6 +11,8 @@ from pathlib import Path
 from demo_controller.models import DemoStatus, DeployRequest
 from demo_controller.naming import hostname
 
+DEMO_LIFETIME_SECONDS = 3 * 24 * 60 * 60
+
 
 @dataclass(frozen=True)
 class DemoRecord:
@@ -119,7 +121,6 @@ class Store:
         self,
         request: DeployRequest,
         request_hash: str,
-        max_lifetime: int,
     ) -> tuple[DemoRecord, bool]:
         now = int(time.time())
         with self._lock, self._connection() as connection:
@@ -156,7 +157,7 @@ class Store:
                     "deployment accepted",
                     created_at,
                     now,
-                    now + max_lifetime,
+                    now + DEMO_LIFETIME_SECONDS,
                 ),
             )
             row = connection.execute(
@@ -240,7 +241,6 @@ class Store:
         *,
         vault_version: int | None = None,
         port: int | None = None,
-        lifetime_seconds: int | None = None,
     ) -> None:
         now = int(time.time())
         fields = ["state=?", "message=?", "updated_at=?"]
@@ -251,9 +251,6 @@ class Store:
         if port is not None:
             fields.append("port=?")
             values.append(port)
-        if lifetime_seconds is not None:
-            fields.append("expires_at=?")
-            values.append(now + lifetime_seconds)
         values.extend([repository, pr])
         with self._lock, self._connection() as connection:
             connection.execute(

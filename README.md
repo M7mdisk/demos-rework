@@ -44,3 +44,17 @@ The registry defaults to `ghcr.io` and can be overridden with `IMAGE_REGISTRY`
 for isolated development registries.
 
 See [`charm/README.md`](charm/README.md) for operator details.
+
+## Documentation
+
+- [`AGENTS.md`](AGENTS.md): repository rules, invariants, validation, and agent
+  handoff guidance.
+- [`docs/architecture.md`](docs/architecture.md): end-to-end architecture and
+  request lifecycle.
+- [`docs/configuration.md`](docs/configuration.md): Juju, Vault, GitHub, and
+  project configuration schemas.
+- [`docs/operations.md`](docs/operations.md): deployment, verification,
+  recovery, and troubleshooting runbook.
+- [`docs/history.md`](docs/history.md): implementation history and production
+  lessons.
+- [`docs/adr/`](docs/adr/): accepted architecture decision records.

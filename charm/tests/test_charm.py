@@ -76,6 +76,7 @@ def test_configures_workload_and_publishes_api_and_wildcard_route(
     assert plan.services["fastapi"].environment["DATABASE_PATH"] == "/data/controller.db"
     assert plan.services["fastapi"].environment["UVICORN_HOST"] == "0.0.0.0"
     assert plan.services["fastapi"].environment["UVICORN_PORT"] == "8080"
+    assert "MAX_DEMO_LIFETIME" not in plan.services["fastapi"].environment
     assert plan.services["fastapi"].environment["HTTPS_PROXY"] == "http://egress.internal:3128"
     assert plan.services["fastapi"].environment["NO_PROXY"] == "localhost,.svc,10.86.0.1"
     data = harness.get_relation_data(relation_id, harness.model.app.name)

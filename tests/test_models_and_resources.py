@@ -57,6 +57,8 @@ def test_project_config_is_strict_and_separates_secrets() -> None:
     with pytest.raises(ValidationError):
         ProjectConfig(schema_version=1, enabled=True, unexpected=True)
     with pytest.raises(ValidationError):
+        ProjectConfig(schema_version=1, enabled=True, lifetime_seconds=3600)
+    with pytest.raises(ValidationError):
         ProjectConfig(
             schema_version=1,
             enabled=True,

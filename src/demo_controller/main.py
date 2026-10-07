@@ -41,7 +41,6 @@ def build_app():
         settings.namespace,
         settings.controller_owner,
         settings.image_registry,
-        settings.max_demo_lifetime_seconds,
         settings.reconcile_interval_seconds,
     )
     return create_app(settings, store, authenticator, reconciliation)

@@ -14,7 +14,7 @@ from demo_controller.api import create_app
 from demo_controller.auth import Authenticator
 from demo_controller.models import DeployRequest
 from demo_controller.settings import Settings
-from demo_controller.store import Store
+from demo_controller.store import DEMO_LIFETIME_SECONDS, Store
 
 
 def signed_request(
@@ -92,11 +92,12 @@ def test_store_is_idempotent_and_contains_no_project_secrets(tmp_path: Path) -> 
         image=f"ghcr.io/canonical/example@sha256:{'b' * 64}",
         delivery_id="delivery-8",
     )
-    first, created = store.upsert_deploy(request, "same-hash", 3600)
-    second, changed = store.upsert_deploy(request, "same-hash", 3600)
+    first, created = store.upsert_deploy(request, "same-hash")
+    second, changed = store.upsert_deploy(request, "same-hash")
     assert created is True
     assert changed is False
     assert first == second
+    assert first.expires_at == first.created_at + DEMO_LIFETIME_SECONDS
     assert b"application-secret-value" not in path.read_bytes()
 
 
@@ -109,7 +110,7 @@ def test_deploy_update_preserves_the_active_route_until_reconciled(tmp_path: Pat
         image=f"ghcr.io/canonical/example@sha256:{'b' * 64}",
         delivery_id="delivery-8-a",
     )
-    store.upsert_deploy(first, "first-hash", 3600)
+    store.upsert_deploy(first, "first-hash")
     store.update_state(
         first.repository,
         first.pr,
@@ -126,7 +127,7 @@ def test_deploy_update_preserves_the_active_route_until_reconciled(tmp_path: Pat
         }
     )
 
-    pending, changed = store.upsert_deploy(update, "second-hash", 3600)
+    pending, changed = store.upsert_deploy(update, "second-hash")
 
     assert changed is True
     assert pending.state == "pending"
@@ -159,7 +160,6 @@ def test_deploy_api_accepts_a_signed_request(tmp_path: Path) -> None:
         vault_role_id="role",
         vault_secret_id="secret",
         hmac_credentials={"canonical/example": "key"},
-        max_demo_lifetime_seconds=3600,
         reconcile_interval_seconds=10,
         request_max_bytes=65536,
         signature_max_age_seconds=300,

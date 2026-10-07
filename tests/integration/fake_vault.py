@@ -24,7 +24,6 @@ PROJECT = {
         "memory_limit": "256Mi",
     },
     "image_namespace": "canonical/webteam-juju-demos-testing",
-    "lifetime_seconds": 3600,
 }
 
 

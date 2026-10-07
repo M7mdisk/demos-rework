@@ -70,7 +70,6 @@ class DemosControllerCharm(ops.CharmBase):
             "VAULT_ROLE_ID": approle["role-id"],
             "VAULT_SECRET_ID": approle["secret-id"],
             "HMAC_CREDENTIALS": json.dumps(credentials, separators=(",", ":"), sort_keys=True),
-            "MAX_DEMO_LIFETIME": str(self.config["max-demo-lifetime"]),
             "RECONCILE_INTERVAL": str(self.config["reconcile-interval"]),
             "REQUEST_MAX_BYTES": str(self.config["request-max-bytes"]),
             "SIGNATURE_MAX_AGE": str(self.config["signature-max-age"]),

@@ -20,7 +20,6 @@ class Settings:
     vault_role_id: str
     vault_secret_id: str
     hmac_credentials: dict[str, str]
-    max_demo_lifetime_seconds: int
     reconcile_interval_seconds: float
     request_max_bytes: int
     signature_max_age_seconds: int
@@ -47,7 +46,6 @@ class Settings:
             vault_role_id=os.getenv("VAULT_ROLE_ID", ""),
             vault_secret_id=os.getenv("VAULT_SECRET_ID", ""),
             hmac_credentials=credentials,
-            max_demo_lifetime_seconds=int(os.getenv("MAX_DEMO_LIFETIME", "604800")),
             reconcile_interval_seconds=float(os.getenv("RECONCILE_INTERVAL", "10")),
             request_max_bytes=int(os.getenv("REQUEST_MAX_BYTES", "65536")),
             signature_max_age_seconds=int(os.getenv("SIGNATURE_MAX_AGE", "300")),
