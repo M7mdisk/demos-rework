@@ -22,3 +22,6 @@ controller-owned Kubernetes Secrets.
 `image-registry` defaults to `ghcr.io`. Override it only for a trusted private
 or local registry; repository matching and immutable digest validation remain
 mandatory.
+
+The Charmhub OCI resource is named `app-image` to match the shared
+`canonical/webteam-devops` pack-and-release workflow.
