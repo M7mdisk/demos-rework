@@ -1,0 +1,59 @@
+name: Publish charm
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      force-charm-build:
+        description: Pack and upload a new charm revision even if charm/ is unchanged
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  configuration:
+    name: Validate publishing configuration
+    runs-on: ubuntu-24.04
+    outputs:
+      channel: ${{ steps.values.outputs.channel }}
+      charm_name: ${{ steps.values.outputs.charm_name }}
+    steps:
+      - name: Check required Actions configuration
+        id: values
+        env:
+          CHANNEL: ${{ vars.CHARMHUB_CHANNEL }}
+          CHARMHUB_TOKEN: ${{ secrets.CHARMHUB_TOKEN }}
+          CHARM_NAME: ${{ vars.CHARM_NAME }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          [ -n "$CHARM_NAME" ] || missing+=("variable CHARM_NAME")
+          [ -n "$CHANNEL" ] || missing+=("variable CHARMHUB_CHANNEL")
+          [ -n "$CHARMHUB_TOKEN" ] || missing+=("secret CHARMHUB_TOKEN")
+          if [ "${#missing[@]}" -ne 0 ]; then
+            printf '::error::Missing Actions configuration: %s\n' "$(IFS=', '; echo "${missing[*]}")"
+            exit 1
+          fi
+          echo "charm_name=$CHARM_NAME" >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: Pack and release
+    needs: configuration
+    uses: canonical/webteam-devops/.github/workflows/pack_release.yaml@f8c070fba63f809efe4521d120ed56c44205b954
+    permissions:
+      contents: read
+      id-token: write
+      packages: write
+    with:
+      charm_name: ${{ needs.configuration.outputs.charm_name }}
+      channel: ${{ needs.configuration.outputs.channel }}
+      force_charm_build: ${{ inputs['force-charm-build'] || false }}
+    secrets:
+      CHARMHUB_TOKEN: ${{ secrets.CHARMHUB_TOKEN }}

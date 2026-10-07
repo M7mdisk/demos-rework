@@ -30,6 +30,9 @@ Vault records.
   reconciliation, Kubernetes rendering, and reverse proxy.
 - `charm/`: Kubernetes charm, NodePort adapter, actions, tests, and metadata.
 - `.github/workflows/`: reusable deploy and cleanup workflows.
+- `.github/workflows/publish-charm.yaml`: main-branch Charmhub publisher using
+  the SHA-pinned `canonical/webteam-devops` reusable workflow; it does not
+  deploy the charm.
 - `.github/scripts/demo_api.py`: dependency-free signed API client.
 - `tests/`: controller tests, fake Vault, and demo workload fixture.
 - `docs/architecture.md`: end-to-end architecture and data flow.
@@ -105,6 +108,9 @@ ignored and must not be committed.
   headers, set `X-Forwarded-Host`, and never route an unknown hostname.
 - Workflow changes must pin third-party actions, check out the exact PR commit,
   avoid persisting credentials, and retain least-privilege permissions.
+- Charm publishing requires the `CHARMHUB_TOKEN` Actions secret plus
+  `CHARM_NAME` and `CHARMHUB_CHANNEL` repository variables. The shared
+  publisher expects the OCI resource name `app-image`.
 - Charm relation values for `haproxy-route` are JSON encoded. The unit
   `address` is also JSON encoded.
 

@@ -8,12 +8,12 @@ assumes:
   - k8s-api
 containers:
   controller:
-    resource: controller-image
+    resource: app-image
     mounts:
       - storage: state
         location: /data
 resources:
-  controller-image:
+  app-image:
     type: oci-image
     description: OCI image for the demos controller workload
 storage:

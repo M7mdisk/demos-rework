@@ -34,6 +34,36 @@ ROCKCRAFT_ENABLE_EXPERIMENTAL_EXTENSIONS=1 rockcraft pack
 The FastAPI framework extension was experimental when implemented, so the
 Rockcraft environment variable is required.
 
+## Publish to Charmhub from GitHub
+
+`.github/workflows/publish-charm.yaml` runs on every push to `main` and can also
+be started manually. It calls the SHA-pinned
+`canonical/webteam-devops/.github/workflows/pack_release.yaml` reusable
+workflow. It packs the root rock, publishes it to GHCR, uploads the OCI resource
+to Charmhub, uploads a new charm revision when `charm/` changed, and releases
+the selected charm revision and resource to the configured channel.
+
+It does not deploy or refresh a Juju application.
+
+Configure these repository Actions values:
+
+| Type | Name | Example | Purpose |
+|---|---|---|---|
+| Secret | `CHARMHUB_TOKEN` | redacted | Charmcraft authorization exported by `charmcraft login` |
+| Variable | `CHARM_NAME` | `demos-controller` | Charmhub charm name |
+| Variable | `CHARMHUB_CHANNEL` | `latest/edge` | Channel receiving each successful release |
+
+The shared workflow expects a generic OCI resource named `app-image`; the charm
+metadata uses that name. Charmhub historically had only `controller-image` for
+this charm. On the first configured run, the workflow uploads the new charm
+revision declaring `app-image` before uploading that resource. Existing
+released revisions keep their historical resource attachment.
+
+The manual `force-charm-build` input uploads a new charm revision even when no
+file under `charm/` changed. A normal push always packs and publishes the rock,
+but the shared workflow reuses the latest charm revision when `charm/` is
+unchanged.
+
 ## Charm deployment requirements
 
 - Kubernetes model.
