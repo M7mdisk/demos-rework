@@ -46,7 +46,7 @@ jobs:
   publish:
     name: Pack and release
     needs: configuration
-    uses: canonical/webteam-devops/.github/workflows/pack_release.yaml@48d5f1f750e6a4ca80643405e999483e5d57fa0c
+    uses: canonical/webteam-devops/.github/workflows/pack_release.yaml@55389c16832737977b853b335f18dc1aab85d8d1
     permissions:
       contents: read
       id-token: write
