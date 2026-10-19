@@ -145,11 +145,18 @@ Important failure behavior:
 - A Vault failure before the first successful deployment marks the record
   failed and exposes no route.
 - A Vault failure after a deployment has a known port marks the update failed
-  but leaves the previous workload routable.
+  but retains the previous resources and route metadata. Retention is not a
+  claim that the backend is available; the error message makes this explicit.
 - A failed replacement does not deliberately delete the previous Kubernetes
   resources.
 - A deletion failure retains a failed record so reconciliation can retry.
 - Expired records are treated as desired absent.
+- Vault transport failures discard the owned HTTP client/pool. Only pre-send
+  pool/connect/proxy failures get one immediate retry; ambiguous failures defer
+  to the next reconciliation without replaying authentication requests.
+- `/statusz` exposes sanitized, cached control-plane diagnostics independently
+  of ingress `/readyz`. The charm uses diagnostics for Juju status without
+  withdrawing retained routes during a dependency failure.
 
 ## Trust boundaries
 

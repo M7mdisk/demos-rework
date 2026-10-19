@@ -129,7 +129,50 @@ class DemosControllerCharm(ops.CharmBase):
             self.unit.status = ops.WaitingStatus("waiting for haproxy-route relation")
             return
         if self._publish_route(None):
-            self.unit.status = ops.ActiveStatus()
+            self._set_workload_status()
+
+    def _set_workload_status(self) -> None:
+        # This is deliberately separate from the ingress /readyz check: a Vault
+        # failure must be visible in Juju without withdrawing retained demo routes.
+        command = [
+            "/bin/python3",
+            "-c",
+            (
+                "import urllib.error, urllib.request\n"
+                "opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))\n"
+                "try:\n"
+                "    response = opener.open('http://localhost:8080/statusz', timeout=3)\n"
+                "except urllib.error.HTTPError as error:\n"
+                "    response = error\n"
+                "with response:\n"
+                "    print(response.read(16384).decode())\n"
+            ),
+        ]
+        try:
+            output, _ = self.container.exec(command, timeout=5).wait_output()
+            health = json.loads(output)
+            if health["database"] != "ok":
+                self.unit.status = ops.WaitingStatus("controller state database unavailable")
+            elif health["reconciliation"]["state"] != "running":
+                self.unit.status = ops.MaintenanceStatus("controller reconciliation loop stopped")
+            elif health["dependencies"]["vault"]["status"] == "error":
+                self.unit.status = ops.WaitingStatus(
+                    "Vault reconciliation degraded; see controller logs"
+                )
+            elif health["dependencies"]["kubernetes"]["status"] == "error":
+                self.unit.status = ops.WaitingStatus(
+                    "Kubernetes reconciliation degraded; see controller logs"
+                )
+            elif health["status"] == "degraded":
+                self.unit.status = ops.WaitingStatus(
+                    "demo reconciliation degraded; see controller logs"
+                )
+            elif health["status"] == "ok":
+                self.unit.status = ops.ActiveStatus()
+            else:
+                self.unit.status = ops.WaitingStatus("waiting for controller diagnostics")
+        except (pebble.Error, OSError, ValueError, KeyError, TypeError, TimeoutError):
+            self.unit.status = ops.WaitingStatus("waiting for controller diagnostics")
 
     def _publish_route(self, _: ops.EventBase | None) -> bool:
         if not self.unit.is_leader():
@@ -212,7 +255,7 @@ class DemosControllerCharm(ops.CharmBase):
             elif self.unit.is_leader() and not self._publish_route(None):
                 return
             else:
-                self.unit.status = ops.ActiveStatus()
+                self._set_workload_status()
 
 
 if __name__ == "__main__":

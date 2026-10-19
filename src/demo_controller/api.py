@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
+import sqlite3
+from collections import Counter
 from collections.abc import AsyncIterator
 
 import httpx
@@ -16,6 +19,8 @@ from demo_controller.reconciler import ReconciliationLoop
 from demo_controller.settings import Settings
 from demo_controller.store import Store
 
+logger = logging.getLogger(__name__)
+
 
 def create_app(
     settings: Settings,
@@ -24,15 +29,31 @@ def create_app(
     reconciliation: ReconciliationLoop,
     proxy_client: httpx.AsyncClient | None = None,
 ) -> FastAPI:
+    task: asyncio.Task[None] | None = None
+    client = proxy_client or httpx.AsyncClient(timeout=settings.proxy_timeout_seconds)
+
+    def report_loop_exit(completed: asyncio.Task[None]) -> None:
+        if not completed.cancelled() and (error := completed.exception()) is not None:
+            logger.error("Reconciliation loop stopped (%s)", type(error).__name__)
+
     @contextlib.asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+        nonlocal task
         task = asyncio.create_task(reconciliation.run())
-        yield
-        reconciliation.stop()
-        await task
+        task.add_done_callback(report_loop_exit)
+        try:
+            yield
+        finally:
+            reconciliation.stop()
+            try:
+                # Loop failures are reported by the callback and /statusz. Still
+                # release clients when an already-failed task is awaited at shutdown.
+                await asyncio.gather(task, return_exceptions=True)
+            finally:
+                if proxy_client is None:
+                    await client.aclose()
 
     app = FastAPI(title="Canonical demos controller", version="1.0", lifespan=lifespan)
-    client = proxy_client or httpx.AsyncClient(timeout=settings.proxy_timeout_seconds)
 
     @app.middleware("http")
     async def body_limit(request: Request, call_next):
@@ -59,8 +80,45 @@ def create_app(
 
     @app.get("/readyz")
     async def ready() -> dict[str, str]:
-        store.list_reconcilable()
+        # Ingress must keep serving retained demos during control-plane failures.
+        try:
+            store.list_reconcilable()
+        except sqlite3.Error as error:
+            raise HTTPException(503, "state database unavailable") from error
         return {"status": "ready"}
+
+    @app.get("/statusz")
+    async def controller_status() -> JSONResponse:
+        dependencies = reconciliation.health()
+        running = task is not None and not task.done()
+        database = "ok"
+        counts: Counter[str] = Counter()
+        try:
+            counts.update(record.state for record in store.list_reconcilable())
+        except sqlite3.Error:
+            database = "error"
+        degraded = (
+            not running
+            or database != "ok"
+            or bool(counts["failed"])
+            or any(item["status"] == "error" for item in dependencies.values())
+        )
+        return JSONResponse(
+            {
+                "status": "degraded" if degraded else "ok",
+                "database": database,
+                "reconciliation": {
+                    "state": "running" if running else "stopped",
+                    "last_completed_at": reconciliation.last_completed_at,
+                },
+                "dependencies": dependencies,
+                "demos": {
+                    state: counts[state]
+                    for state in ("pending", "reconciling", "ready", "failed", "deleting")
+                },
+            },
+            status_code=503 if degraded else 200,
+        )
 
     @app.post("/api/v1/deploy", status_code=status.HTTP_202_ACCEPTED)
     async def deploy(

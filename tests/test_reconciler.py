@@ -81,7 +81,11 @@ async def test_vault_outage_keeps_existing_ready_demo_routable(tmp_path: Path) -
     updated = store.get(request.repository, request.pr)
     assert updated is not None
     assert updated.state == "failed"
-    assert updated.message == "update failed; previous deployment remains available"
+    assert updated.message == (
+        "Vault project lookup failed; previous resources retained; "
+        "backend availability is not verified"
+    )
+    assert loop.health()["vault"]["status"] == "error"
     assert (
         store.get_ready_by_hostname(hostname(updated.repository, updated.pr, "demos.canonical.com"))
         == updated
@@ -117,3 +121,5 @@ async def test_vault_image_namespace_accepts_repository_digest(tmp_path: Path) -
     assert updated is not None
     assert updated.state == "ready"
     assert kubernetes.applied is True
+    assert loop.health()["vault"]["status"] == "ok"
+    assert loop.health()["kubernetes"]["status"] == "ok"

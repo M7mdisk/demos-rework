@@ -13,11 +13,20 @@ from kubernetes import (
 )
 from lightkube import ApiError
 from lightkube.resources.core_v1 import Service
-from ops.testing import Harness
+from ops.testing import ExecResult, Harness
 
 from charm import DemosControllerCharm
 
 ROOT = Path(__file__).parents[1]
+
+
+def healthy_status():
+    return {
+        "status": "ok",
+        "database": "ok",
+        "reconciliation": {"state": "running"},
+        "dependencies": {"vault": {"status": "ok"}, "kubernetes": {"status": "ok"}},
+    }
 
 
 def make_harness(client: MagicMock | None = None) -> Harness[DemosControllerCharm]:
@@ -29,6 +38,9 @@ def make_harness(client: MagicMock | None = None) -> Harness[DemosControllerChar
     )
     with patch("charm.Client", return_value=client or MagicMock()):
         harness.begin()
+    harness.handle_exec(
+        "controller", ["/bin/python3"], result=ExecResult(stdout=json.dumps(healthy_status()))
+    )
     return harness
 
 
@@ -148,3 +160,66 @@ def test_cleanup_deletes_only_the_owned_nodeport() -> None:
     client.get.return_value = foreign
     adapter.cleanup()
     client.delete.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "failure, status_type, message",
+    [
+        ("vault", ops.WaitingStatus, "Vault reconciliation degraded"),
+        ("kubernetes", ops.WaitingStatus, "Kubernetes reconciliation degraded"),
+        ("database", ops.WaitingStatus, "state database unavailable"),
+        ("reconciliation", ops.MaintenanceStatus, "reconciliation loop stopped"),
+        ("demo", ops.WaitingStatus, "demo reconciliation degraded"),
+    ],
+)
+def test_degraded_diagnostics_are_visible_without_changing_ingress(failure, status_type, message):
+    harness = make_harness(nodeport_client())
+    harness.set_leader(True)
+    relation_id = harness.add_relation("haproxy-route", "haproxy")
+    with patch.object(DemosControllerCharm, "_environment", return_value={"configured": "yes"}):
+        harness.container_pebble_ready("controller")
+        previous_route = dict(harness.get_relation_data(relation_id, harness.model.app.name))
+        health = healthy_status()
+        health["status"] = "degraded"
+        if failure in {"vault", "kubernetes"}:
+            health["dependencies"][failure]["status"] = "error"
+        elif failure == "database":
+            health["database"] = "error"
+        elif failure == "reconciliation":
+            health["reconciliation"]["state"] = "stopped"
+        harness.handle_exec(
+            "controller", ["/bin/python3"], result=ExecResult(stdout=json.dumps(health))
+        )
+        harness.charm.on.update_status.emit()
+        assert isinstance(harness.model.unit.status, status_type)
+        assert message in harness.model.unit.status.message
+        assert (
+            dict(harness.get_relation_data(relation_id, harness.model.app.name)) == previous_route
+        )
+        assert json.loads(previous_route["check"])["path"] == "/readyz"
+        harness.handle_exec(
+            "controller", ["/bin/python3"], result=ExecResult(stdout=json.dumps(healthy_status()))
+        )
+        harness.charm.on.update_status.emit()
+        assert isinstance(harness.model.unit.status, ops.ActiveStatus)
+    harness.cleanup()
+
+
+@pytest.mark.parametrize("output", ["", "not JSON", "{}", "[]", '{"status":"ok"}'])
+def test_invalid_diagnostics_do_not_report_active(output):
+    harness = make_harness()
+    harness.set_can_connect("controller", True)
+    harness.handle_exec("controller", ["/bin/python3"], result=ExecResult(stdout=output))
+    harness.charm._set_workload_status()
+    assert isinstance(harness.model.unit.status, ops.WaitingStatus)
+    assert harness.model.unit.status.message == "waiting for controller diagnostics"
+    harness.cleanup()
+
+
+def test_unreachable_diagnostics_do_not_report_active():
+    harness = make_harness()
+    harness.set_can_connect("controller", True)
+    harness.handle_exec("controller", ["/bin/python3"], result=ExecResult(exit_code=1))
+    harness.charm._set_workload_status()
+    assert isinstance(harness.model.unit.status, ops.WaitingStatus)
+    harness.cleanup()

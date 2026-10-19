@@ -101,10 +101,34 @@ Unauthenticated controller probes:
 ```text
 GET /healthz
 GET /readyz
+GET /statusz
 ```
 
-`/readyz` confirms that SQLite can be queried. It does not guarantee Vault,
-Kubernetes, every demo backend, or external ingress are healthy.
+These endpoints serve different purposes:
+
+- `/healthz`: the HTTP process is alive.
+- `/readyz`: SQLite can be queried and the API/proxy can serve traffic. This
+  remains independent of Vault and reconciliation failures so ingress does not
+  withdraw retained demo routes during a control-plane outage. A database
+  failure returns a sanitized HTTP 503.
+- `/statusz`: cached controller diagnostics, returning HTTP 503 when the
+  reconciliation task has stopped, SQLite is unavailable, a dependency's last
+  observation failed, or any persisted demo is failed. Otherwise it returns
+  HTTP 200. It includes task state, the last completed loop timestamp, aggregate
+  demo-state counts, and Vault/Kubernetes observation status, timestamp, and
+  sanitized error category. It contains no repository identities or secrets.
+
+Diagnostics requests do not authenticate to Vault or call Kubernetes. Dependency
+status starts as `unknown` until reconciliation exercises that dependency;
+`ok`/`error` describes the last observation, not a new live probe or a guarantee
+that every demo backend is healthy. A failed repository lookup does not prove
+that the whole Vault service is down. Check `checked_at` and
+`last_completed_at` when interpreting old observations.
+
+The charm polls `/statusz` during configuration and `update-status`. A Vault or
+Kubernetes reconciliation failure becomes a Juju waiting status; a stopped
+reconciliation task becomes maintenance. These status changes do not remove or
+alter the ingress route, whose check remains `/readyz`.
 
 Repository demo status is authenticated:
 
@@ -211,6 +235,29 @@ resources.
 - Confirm KV v2 mount and base path are not confused with `/data/` API syntax.
 - Check logs for the underlying HTTP exception or status.
 
+### Vault requests repeatedly report `PoolTimeout`
+
+A pool timeout means the HTTP client could not obtain a connection; it does not
+by itself establish a Vault server outage or rejected credentials. In particular,
+failed TLS setup after an HTTP proxy CONNECT can strand unusable pool slots in
+httpcore 1.0.9.
+
+The controller serializes Vault requests and replaces its owned HTTP client on
+transport failure, closing the failed pool. Pool/connect/proxy setup failures
+get at most one retry after a short delay. HTTP error responses are not retried
+by this recovery mechanism. Ambiguous read/write failures reset the client for
+the next reconciliation but do not replay the current login or renewal. Token
+renewal transport failures do not fall through to an additional login.
+
+Replacement preserves TLS verification and the process's proxy/`NO_PROXY`
+configuration. A valid cached Vault token is retained across pool replacement.
+Persistent failures still produce a sanitized error and a degraded `/statusz`;
+the normal reconciliation interval bounds subsequent attempts. Increasing pool
+limits or restarting Vault is not a substitute for pool recovery.
+
+The Vault and proxy clients owned by the controller are closed on shutdown.
+Injected clients remain the caller's responsibility.
+
 ### Vault returns 404
 
 The repository record does not exist at the configured mount/base/versioned
@@ -234,9 +281,13 @@ assigned to the controller or request a policy change.
 
 ### Deployment fails after an update but old demo still responds
 
-This is expected resilience behavior. The status reflects the failed update,
-while stored route metadata keeps the previous deployment reachable. Fix the
-configuration/image and submit a new delivery.
+The controller retains previous resources and route metadata when a Vault
+update fails, but this does not verify that the retained backend is healthy.
+The failure message includes the sanitized Vault failure and explicitly says
+backend availability is not verified. Check Deployment availability and the
+actual backend before claiming the previous demo still works. Fix the failure;
+the reconciliation loop retries persisted desired state without requiring a new
+delivery.
 
 ### API rejects a retry as replayed
 
