@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 from demo_controller.api import create_app
 from demo_controller.auth import Authenticator
 from demo_controller.models import DeployRequest, ProjectConfig
+from demo_controller.naming import resource_name
 from demo_controller.reconciler import ReconciliationLoop
 from demo_controller.settings import Settings
 from demo_controller.store import Store
@@ -183,6 +184,46 @@ async def test_proxy_client_owned_by_caller_is_not_closed(controller) -> None:
         with TestClient(application) as client:
             assert client.get("/readyz").status_code == 200
         assert not proxy.is_closed
+
+
+async def test_proxy_sends_public_hostname_as_upstream_host_header(controller) -> None:
+    """Upstream must receive the public hostname as its actual Host header.
+
+    Applications that do not trust X-Forwarded-Host (snapcraft.io's ProxyFix
+    runs with x_host=0) build absolute redirect URLs, such as the OpenID
+    return URL, from the Host header. Without this the upstream would see the
+    ClusterIP service DNS name and redirect browsers to an unreachable
+    cluster-internal URL after login.
+    """
+    _, store, loop, _, _ = controller
+    add_demo(store)
+    store.update_state("canonical/example", 1, "ready", "", port=8000)
+    captured: list[httpx.Request] = []
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        captured.append(request)
+        return httpx.Response(302, headers={"Location": "/login?next=/snaps"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as proxy:
+        settings = MagicMock(spec=Settings)
+        settings.hostname_suffix = "demos.example"
+        settings.namespace = "testing"
+        settings.proxy_timeout_seconds = 3
+        auth = Authenticator({}, store, 300, 60)
+        application = create_app(settings, store, auth, loop, proxy_client=proxy)
+        with TestClient(application) as client:
+            response = client.get(
+                "/login",
+                headers={"Host": "example-pr-1.demos.example", "X-Forwarded-Proto": "https"},
+                follow_redirects=False,
+            )
+    assert response.status_code == 302
+    assert response.headers["location"] == "/login?next=/snaps"
+    (request,) = captured
+    assert request.url.host == f"{resource_name('canonical/example', 1)}.testing.svc.cluster.local"
+    assert request.headers["host"] == "example-pr-1.demos.example"
+    assert request.headers["x-forwarded-host"] == "example-pr-1.demos.example"
+    assert request.headers["x-forwarded-proto"] == "https"
 
 
 @pytest.mark.parametrize(

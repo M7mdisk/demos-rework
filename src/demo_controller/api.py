@@ -198,6 +198,12 @@ def create_app(
             for key, value in request.headers.items()
             if key.lower() not in {"host", "content-length", "connection"}
         }
+        # Upstream must see the public hostname as the actual Host header.
+        # Applications that do not trust X-Forwarded-Host (e.g. snapcraft.io,
+        # whose ProxyFix uses x_host=0) build absolute redirect URLs such as
+        # OpenID return URLs from the Host header, which would otherwise be
+        # the internal ClusterIP service DNS name and break the login flow.
+        headers["host"] = requested_host
         headers["x-forwarded-host"] = requested_host
         try:
             upstream = await client.request(

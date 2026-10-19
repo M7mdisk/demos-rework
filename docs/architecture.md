@@ -118,7 +118,14 @@ controller NodePort. The controller then:
 2. requires it to end with the configured suffix;
 3. finds an active persisted record for the exact hostname;
 4. resolves the controller-owned ClusterIP Service;
-5. proxies the request inside the model.
+5. proxies the request inside the model, sending the public hostname as the
+   upstream `Host` header (and `X-Forwarded-Host`).
+
+The upstream `Host` header must stay the public hostname, not the ClusterIP
+service DNS name: demo applications that do not trust `X-Forwarded-Host`
+build absolute redirect URLs, such as OpenID login return URLs, from the
+`Host` header, and a cluster-internal value would break the login flow after
+the SSO round-trip.
 
 This avoids trying to mutate relation data for every pull request and avoids
 creating one Juju application per demo.
