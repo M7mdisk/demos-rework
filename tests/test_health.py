@@ -226,6 +226,34 @@ async def test_proxy_sends_public_hostname_as_upstream_host_header(controller) -
     assert request.headers["x-forwarded-proto"] == "https"
 
 
+async def test_unknown_demo_hostname_returns_empty_404(controller) -> None:
+    """Browsers hitting an unknown or inactive demo hostname get an empty 404.
+
+    The wildcard route serves end users, not API clients, so it must not leak
+    controller error details as a JSON body. A 200 from the mock upstream
+    would prove the request was wrongly forwarded.
+    """
+    _, store, loop, vault, _ = controller
+    add_demo(store)
+    # Keep the demo out of the ready state so the hostname stays unroutable.
+    vault.project.side_effect = VaultError("vault unavailable")
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(lambda _: httpx.Response(200))
+    ) as proxy:
+        settings = MagicMock(spec=Settings)
+        settings.hostname_suffix = "demos.example"
+        settings.namespace = "testing"
+        settings.proxy_timeout_seconds = 3
+        auth = Authenticator({}, store, 300, 60)
+        application = create_app(settings, store, auth, loop, proxy_client=proxy)
+        with TestClient(application) as client:
+            for host in ("asdf.demos.example", "example-pr-1.demos.example"):
+                response = client.get("/", headers={"Host": host})
+                assert response.status_code == 404
+                assert response.content == b""
+                assert "content-type" not in response.headers
+
+
 @pytest.mark.parametrize(
     "repository, timestamp_offset, expected_status",
     [("example", 0, 200), ("other", 0, 403), ("example", -301, 401), ("example", 301, 401)],

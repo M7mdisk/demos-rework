@@ -184,11 +184,13 @@ def create_app(
     )
     async def proxy(path: str, request: Request) -> Response:
         requested_host = request.headers.get("host", "").split(":", 1)[0].lower().rstrip(".")
+        # Demo hostnames serve browsers, not API clients: unknown or inactive
+        # hostnames must return an empty 404 rather than a JSON error detail.
         if not requested_host.endswith(f".{settings.hostname_suffix}"):
-            raise HTTPException(404, "unknown demo hostname")
+            return Response(status_code=404)
         record = store.get_ready_by_hostname(requested_host)
         if not record or not record.port:
-            raise HTTPException(404, "demo is not active")
+            return Response(status_code=404)
         service = resource_name(record.repository, record.pr)
         target = f"http://{service}.{settings.namespace}.svc.cluster.local:{record.port}/{path}"
         if request.url.query:
