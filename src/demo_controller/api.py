@@ -53,7 +53,18 @@ def create_app(
                 if proxy_client is None:
                     await client.aclose()
 
-    app = FastAPI(title="Canonical demos controller", version="1.0", lifespan=lifespan)
+    # FastAPI's auto-registered /docs, /redoc, and /openapi.json would match
+    # before the catch-all proxy route and hijack the same paths on every demo
+    # hostname (and leak the API schema publicly). The controller is an
+    # HMAC-authenticated machine API: disable the interactive docs entirely.
+    app = FastAPI(
+        title="Canonical demos controller",
+        version="1.0",
+        lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
+        openapi_url=None,
+    )
 
     @app.middleware("http")
     async def body_limit(request: Request, call_next):

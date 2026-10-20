@@ -226,6 +226,37 @@ async def test_proxy_sends_public_hostname_as_upstream_host_header(controller) -
     assert request.headers["x-forwarded-proto"] == "https"
 
 
+async def test_controller_docs_paths_are_proxied_to_the_demo(controller) -> None:
+    """Built-in /docs, /redoc, and /openapi.json must not shadow demo paths.
+
+    FastAPI registers those routes before the catch-all proxy, so without
+    disabling them a demo's own /docs page would be replaced by the
+    controller's Swagger UI and the API schema would leak publicly.
+    """
+    _, store, loop, _, _ = controller
+    add_demo(store)
+    store.update_state("canonical/example", 1, "ready", "", port=8000)
+    proxied: list[str] = []
+
+    def upstream(request: httpx.Request) -> httpx.Response:
+        proxied.append(request.url.path)
+        return httpx.Response(200, text="workload docs")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as proxy:
+        settings = MagicMock(spec=Settings)
+        settings.hostname_suffix = "demos.example"
+        settings.namespace = "testing"
+        settings.proxy_timeout_seconds = 3
+        auth = Authenticator({}, store, 300, 60)
+        application = create_app(settings, store, auth, loop, proxy_client=proxy)
+        with TestClient(application) as client:
+            for path in ("/docs", "/redoc", "/openapi.json"):
+                response = client.get(path, headers={"Host": "example-pr-1.demos.example"})
+                assert response.status_code == 200
+                assert response.text == "workload docs"
+    assert proxied == ["/docs", "/redoc", "/openapi.json"]
+
+
 async def test_unknown_demo_hostname_returns_empty_404(controller) -> None:
     """Browsers hitting an unknown or inactive demo hostname get an empty 404.
 
