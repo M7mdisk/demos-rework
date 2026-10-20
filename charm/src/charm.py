@@ -4,8 +4,15 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 
 import ops
+from demo_logs import (
+    DEFAULT_TAIL,
+    MAX_TAIL,
+    DemoLogsError,
+    fetch_demo_logs,
+)
 from kubernetes import KubernetesAdapter, KubernetesPermissionError
 from lightkube import ApiError, Client
 from ops import pebble
@@ -30,6 +37,7 @@ class DemosControllerCharm(ops.CharmBase):
         framework.observe(self.on.remove, self._remove)
         framework.observe(self.on.reconcile_action, self._reconcile_action)
         framework.observe(self.on.show_endpoint_action, self._show_endpoint_action)
+        framework.observe(self.on.demo_logs_action, self._demo_logs_action)
         framework.observe(self.on.update_status, self._update_status)
 
     def _secret_content(self, config_name: str) -> dict[str, str] | None:
@@ -239,6 +247,21 @@ class DemosControllerCharm(ops.CharmBase):
                 "service": f"{self.app.name}.{self.model.name}.svc.cluster.local:8080",
             }
         )
+
+    def _demo_logs_action(self, event: ops.ActionEvent) -> None:
+        repository = str(event.params["repository"]).strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository):
+            event.fail("repository must be the owner/name GitHub repository")
+            return
+        tail = min(max(int(event.params.get("tail") or DEFAULT_TAIL), 1), MAX_TAIL)
+        try:
+            logs = fetch_demo_logs(
+                self.kubernetes.client, repository, int(event.params["pr"]), tail
+            )
+        except DemoLogsError as error:
+            event.fail(str(error))
+            return
+        event.set_results({"logs": logs, "tail": tail})
 
     def _update_status(self, _: ops.UpdateStatusEvent) -> None:
         environment = self._environment()

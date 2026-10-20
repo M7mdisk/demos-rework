@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import ops
 import pytest
+from demo_logs import MAX_TAIL, DemoLogsError
 from kubernetes import (
     MANAGED_BY_LABEL,
     OWNER_ANNOTATION,
@@ -13,7 +14,7 @@ from kubernetes import (
 )
 from lightkube import ApiError
 from lightkube.resources.core_v1 import Service
-from ops.testing import ExecResult, Harness
+from ops.testing import ActionFailed, ExecResult, Harness
 
 from charm import DemosControllerCharm
 
@@ -222,4 +223,46 @@ def test_unreachable_diagnostics_do_not_report_active():
     harness.handle_exec("controller", ["/bin/python3"], result=ExecResult(exit_code=1))
     harness.charm._set_workload_status()
     assert isinstance(harness.model.unit.status, ops.WaitingStatus)
+    harness.cleanup()
+
+
+def test_demo_logs_action_returns_logs() -> None:
+    harness = make_harness()
+    with patch("charm.fetch_demo_logs", return_value="line1\nline2\n") as fetch:
+        output = harness.run_action(
+            "demo-logs",
+            {"repository": "canonical/snapcraft.io", "pr": 5932, "tail": 50},
+        )
+    assert fetch.call_args.args[1:] == ("canonical/snapcraft.io", 5932, 50)
+    assert output.results == {"logs": "line1\nline2\n", "tail": 50}
+    harness.cleanup()
+
+
+def test_demo_logs_action_clamps_tail_to_maximum() -> None:
+    harness = make_harness()
+    with patch("charm.fetch_demo_logs", return_value="") as fetch:
+        harness.run_action("demo-logs", {"repository": "o/r", "pr": 1, "tail": 99_999})
+    assert fetch.call_args.args[3] == MAX_TAIL
+    harness.cleanup()
+
+
+def test_demo_logs_action_fails_without_demo_pod() -> None:
+    harness = make_harness()
+    with (
+        patch(
+            "charm.fetch_demo_logs",
+            side_effect=DemoLogsError("no running demo pod for o/r#1"),
+        ),
+        pytest.raises(ActionFailed) as failure,
+    ):
+        harness.run_action("demo-logs", {"repository": "o/r", "pr": 1})
+    assert "no running demo pod" in failure.value.message
+    harness.cleanup()
+
+
+def test_demo_logs_action_rejects_invalid_repository() -> None:
+    harness = make_harness()
+    with patch("charm.fetch_demo_logs") as fetch, pytest.raises(ActionFailed):
+        harness.run_action("demo-logs", {"repository": "not-a-repo", "pr": 1})
+    fetch.assert_not_called()
     harness.cleanup()

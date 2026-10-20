@@ -2,3 +2,18 @@ reconcile:
   description: Restart the controller service to trigger immediate recovery reconciliation.
 show-endpoint:
   description: Show the wildcard hostname and in-model controller service endpoint.
+demo-logs:
+  description: Tail the Pebble service logs of a demo workload pod.
+  params:
+    repository:
+      type: string
+      description: |
+        GitHub repository of the demo, for example canonical/snapcraft.io.
+    pr:
+      type: integer
+      description: Pull request number of the demo.
+    tail:
+      type: integer
+      description: Number of most recent log lines to return.
+      default: 200
+  required: [repository, pr]

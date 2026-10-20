@@ -88,6 +88,18 @@ Useful action:
 juju run demos-controller/leader show-endpoint
 ```
 
+Tail a demo workload's Pebble logs (demo output never reaches the container
+log API, because Pebble keeps service output in its in-container store):
+
+```bash
+juju run demos-controller/leader demo-logs \
+    repository=canonical/snapcraft.io pr=5932 tail=200
+```
+
+The action execs `pebble logs` into the demo pod through the Kubernetes
+exec API, so it requires the same model access as any other action. `tail`
+is capped at 2000 lines and the result is size limited.
+
 Restart/reconcile:
 
 ```bash
