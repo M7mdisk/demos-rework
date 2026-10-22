@@ -69,8 +69,9 @@ class DemosControllerCharm(ops.CharmBase):
             "CONTROLLER_OWNER": self.app.name,
             "HOSTNAME_SUFFIX": str(self.config["hostname-suffix"]).strip("."),
             "IMAGE_REGISTRY": str(self.config["image-registry"]).strip().strip("/").lower(),
-            "UVICORN_HOST": "0.0.0.0",
-            "UVICORN_PORT": "8080",
+            "API_HOSTNAME": str(self.config["api-hostname"]).strip("."),
+            "UVICORN_HOST": "127.0.0.1",
+            "UVICORN_PORT": "8081",
             "VAULT_ADDRESS": str(self.config["vault-address"]),
             "VAULT_NAMESPACE": str(self.config["vault-namespace"]),
             "VAULT_KV_MOUNT": str(self.config["vault-kv-mount"]),
@@ -89,7 +90,8 @@ class DemosControllerCharm(ops.CharmBase):
         ):
             if value := os.getenv(juju_name):
                 environment[standard_name] = value
-        no_proxy = [item for item in os.getenv("JUJU_CHARM_NO_PROXY", "").split(",") if item]
+        no_proxy = ["localhost", "127.0.0.1"]
+        no_proxy.extend(item for item in os.getenv("JUJU_CHARM_NO_PROXY", "").split(",") if item)
         if kubernetes_service_host := os.getenv("KUBERNETES_SERVICE_HOST"):
             no_proxy.append(kubernetes_service_host)
         if no_proxy:
@@ -116,7 +118,20 @@ class DemosControllerCharm(ops.CharmBase):
                         "startup": "enabled",
                         "working-dir": "/app",
                         "environment": environment,
-                    }
+                    },
+                    "caddy": {
+                        "override": "replace",
+                        "summary": "stateless demo reverse proxy",
+                        "command": "/bin/python3 -m demo_controller.routing",
+                        "startup": "enabled",
+                        "working-dir": "/app",
+                        # No Vault/HMAC credentials or egress proxy in Caddy.
+                        "environment": {
+                            key: environment[key]
+                            for key in ("API_HOSTNAME", "KUBERNETES_NAMESPACE", "HOSTNAME_SUFFIX")
+                        }
+                        | {"XDG_CONFIG_HOME": "/data", "XDG_DATA_HOME": "/data"},
+                    },
                 },
                 "checks": {
                     "ready": {
@@ -149,7 +164,7 @@ class DemosControllerCharm(ops.CharmBase):
                 "import urllib.error, urllib.request\n"
                 "opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))\n"
                 "try:\n"
-                "    response = opener.open('http://localhost:8080/statusz', timeout=3)\n"
+                "    response = opener.open('http://localhost:8081/statusz', timeout=3)\n"
                 "except urllib.error.HTTPError as error:\n"
                 "    response = error\n"
                 "with response:\n"
@@ -170,6 +185,10 @@ class DemosControllerCharm(ops.CharmBase):
             elif health["dependencies"]["kubernetes"]["status"] == "error":
                 self.unit.status = ops.WaitingStatus(
                     "Kubernetes reconciliation degraded; see controller logs"
+                )
+            elif health["dependencies"].get("caddy", {}).get("status") == "error":
+                self.unit.status = ops.WaitingStatus(
+                    "Caddy route synchronization degraded; retained routes still served"
                 )
             elif health["status"] == "degraded":
                 self.unit.status = ops.WaitingStatus(
@@ -270,8 +289,10 @@ class DemosControllerCharm(ops.CharmBase):
         elif not self.container.can_connect():
             self.unit.status = ops.WaitingStatus("waiting for controller container")
         else:
-            services = self.container.get_services(self._SERVICE)
-            if not services or not services[self._SERVICE].is_running():
+            services = self.container.get_services(self._SERVICE, "caddy")
+            if "caddy" not in services or not services["caddy"].is_running():
+                self.unit.status = ops.MaintenanceStatus("Caddy service is not running")
+            elif self._SERVICE not in services or not services[self._SERVICE].is_running():
                 self.unit.status = ops.MaintenanceStatus("controller service is not running")
             elif not self.model.relations["haproxy-route"]:
                 self.unit.status = ops.WaitingStatus("waiting for haproxy-route relation")

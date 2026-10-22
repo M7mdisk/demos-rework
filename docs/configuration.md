@@ -36,7 +36,16 @@ Important options:
 - `rate-limit-per-minute`: authenticated requests per repository per process.
 
 The charm converts these options into controller environment variables and
-adds proxy settings supplied by Juju.
+adds proxy settings supplied by Juju. `API_HOSTNAME` selects the exact hostname
+Caddy routes to the API. FastAPI binds only to `127.0.0.1:8081`; Caddy binds to
+`:8080` and administers routes on `127.0.0.1:2019`. These ports are internal
+implementation details, not charm options.
+
+Caddy receives only hostnames, namespace, and XDG storage paths, not Vault/HMAC
+credentials or egress proxy variables. `XDG_CONFIG_HOME=/data` stores Caddy's
+autosaved configuration at `/data/caddy/autosave.json`. Its bootstrap config is
+`/data/caddy-bootstrap.json`. Both contain routing metadata only. The old
+`PROXY_TIMEOUT` environment setting is removed along with the Python proxy.
 
 ## Juju secret shapes
 

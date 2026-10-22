@@ -1,6 +1,6 @@
 # ADR 0003: Route one wildcard through the controller proxy
 
-- Status: Accepted
+- Status: Accepted; Python forwarding superseded by [ADR 0008](0008-embedded-caddy.md)
 - Date: 2025
 
 ## Context

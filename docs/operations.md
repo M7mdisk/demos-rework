@@ -74,13 +74,22 @@ unchanged.
 - An HMAC credentials Juju secret.
 - Network egress to Vault and any other required external services.
 
-The charm workload runs:
+The charm runs two Pebble services with working directory `/app`:
 
-```text
-/bin/python3 -m uvicorn app:app
-```
+- `fastapi`: `/bin/python3 -m uvicorn app:app`, bound to `127.0.0.1:8081`;
+- `caddy`: `/bin/python3 -m demo_controller.routing`, which generates a bootstrap
+  config and execs `/usr/bin/caddy run --resume --config /data/caddy-bootstrap.json`.
 
-with working directory `/app`, listening on `0.0.0.0:8080`.
+Caddy owns port 8080; the NodePort and ingress relation do not change. Its admin
+API binds only to `127.0.0.1:2019`. Accepted configurations are autosaved to
+`/data/caddy/autosave.json`. Do not delete this file during a control-plane outage:
+it lets Caddy resume retained demo routes without SQLite, Vault, or FastAPI.
+Caddy receives no Vault/HMAC credentials or egress proxy variables.
+
+Upgrade the charm and workload image together: the old charm expects FastAPI
+on port 8080 and does not supervise Caddy. A rollback also requires a matching
+charm/image pair. Keep external ingress HTTPS-only; Caddy sends an explicit
+`X-Forwarded-Proto: https` to upstreams.
 
 Useful action:
 
@@ -119,15 +128,17 @@ GET /statusz
 These endpoints serve different purposes:
 
 - `/healthz`: the HTTP process is alive.
-- `/readyz`: SQLite can be queried and the API/proxy can serve traffic. This
-  remains independent of Vault and reconciliation failures so ingress does not
-  withdraw retained demo routes during a control-plane outage. A database
-  failure returns a sanitized HTTP 503.
+- `/readyz` on the API hostname: SQLite can be queried and FastAPI can serve
+  traffic. A database failure returns a sanitized HTTP 503.
+- `/readyz` with an empty, localhost, or loopback Host: Caddy's independent
+  readiness response, used by HAProxy's hostless probe and Pebble. It remains
+  healthy even if FastAPI/SQLite/Vault fail, so retained demo routes stay in
+  ingress. On a demo hostname `/readyz` is forwarded to that demo unchanged.
 - `/statusz`: cached controller diagnostics, returning HTTP 503 when the
   reconciliation task has stopped, SQLite is unavailable, a dependency's last
   observation failed, or any persisted demo is failed. Otherwise it returns
   HTTP 200. It includes task state, the last completed loop timestamp, aggregate
-  demo-state counts, and Vault/Kubernetes observation status, timestamp, and
+  demo-state counts, and Vault/Kubernetes/Caddy observation status, timestamp, and
   sanitized error category. It contains no repository identities or secrets.
 
 Diagnostics requests do not authenticate to Vault or call Kubernetes. Dependency
@@ -137,8 +148,9 @@ that every demo backend is healthy. A failed repository lookup does not prove
 that the whole Vault service is down. Check `checked_at` and
 `last_completed_at` when interpreting old observations.
 
-The charm polls `/statusz` during configuration and `update-status`. A Vault or
-Kubernetes reconciliation failure becomes a Juju waiting status; a stopped
+The charm polls FastAPI's loopback `/statusz` during configuration and
+`update-status`. A Vault, Kubernetes, or Caddy publication failure becomes a
+Juju waiting status; a stopped
 reconciliation task becomes maintenance. These status changes do not remove or
 alter the ingress route, whose check remains `/readyz`.
 
@@ -152,9 +164,27 @@ Lifecycle states:
 
 - `pending`: accepted but not yet reconciled;
 - `reconciling`: loading config, applying resources, or waiting for readiness;
-- `ready`: Deployment reports available replicas;
+- `ready`: Deployment reports available replicas and its Caddy route was accepted;
 - `failed`: the latest reconciliation or deletion attempt failed;
 - `deleting`: desired state is absent and resources are being removed.
+
+## Caddy routing verification
+
+Inspect services with `juju ssh --container controller demos-controller/leader
+pebble services`. Inspect proxy errors with `pebble logs caddy` in that container.
+Do not expose port 2019 or enable verbose request logging containing cookies.
+
+For local protocol regression tests, install Caddy from the Ubuntu archive or
+set `CADDY_BINARY` to an extracted executable, then run:
+
+```bash
+CADDY_BINARY=/path/to/caddy uv run --extra test pytest -q tests/test_routing.py
+```
+
+These tests use local subprocesses and synthetic sessions only. They verify
+multiple visitors, repeated cookies, login/logout, original paths and queries,
+forwarding headers, WebSockets, rejected config updates, and persisted restart
+recovery. Without Caddy the subprocess cases are explicitly skipped.
 
 ## Verify through ingress without DNS
 
@@ -201,7 +231,9 @@ JUJU_CHARM_NO_PROXY
 ```
 
 The charm maps them to workload `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY`.
-It also appends the exact `KUBERNETES_SERVICE_HOST` value to `NO_PROXY`.
+It also includes `localhost`, `127.0.0.1`, and the exact
+`KUBERNETES_SERVICE_HOST` value in `NO_PROXY`. These egress settings apply only
+to FastAPI; Caddy uses direct in-cluster upstream connections.
 
 This exact-host bypass is essential. CIDR entries in `NO_PROXY` were not
 reliably honored by the HTTP stack, causing Lightkube to send in-cluster
@@ -267,7 +299,9 @@ Persistent failures still produce a sanitized error and a degraded `/statusz`;
 the normal reconciliation interval bounds subsequent attempts. Increasing pool
 limits or restarting Vault is not a substitute for pool recovery.
 
-The Vault and proxy clients owned by the controller are closed on shutdown.
+The Vault and local Caddy administration clients owned by the controller are
+closed on shutdown. Caddy itself remains an independent Pebble service; the
+`reconcile` action restarts FastAPI without restarting the proxy.
 Injected clients remain the caller's responsibility.
 
 ### Vault returns 404

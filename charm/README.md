@@ -15,6 +15,14 @@ node `InternalIP` addresses plus the allocated NodePort through JSON-encoded
 `haproxy-route` v2 application data. Cluster-wide node discovery and Service
 management require deploying the charm with `--trust`.
 
+Pebble manages FastAPI on `127.0.0.1:8081` and embedded Caddy on port 8080.
+Caddy's administration API listens only on `127.0.0.1:2019`. The controller
+publishes exact-host routes; Caddy handles all demo traffic without storing
+browser sessions. `/data/caddy/autosave.json` retains the last accepted routing
+configuration across restarts, independently of Vault and FastAPI availability.
+Public traffic must arrive through the HTTPS ingress; Caddy explicitly sets
+`X-Forwarded-Proto: https` for upstream applications.
+
 The workload stores only non-secret desired state in `/data/controller.db`;
 application secret values are read from Vault and projected directly into
 controller-owned Kubernetes Secrets.

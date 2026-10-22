@@ -7,15 +7,12 @@ import logging
 import sqlite3
 from collections import Counter
 from collections.abc import AsyncIterator
-from http.cookiejar import Cookie, CookieJar
 
-import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 
 from demo_controller.auth import Authenticator, request_hash
 from demo_controller.models import DeployRequest, DestroyRequest
-from demo_controller.naming import resource_name
 from demo_controller.reconciler import ReconciliationLoop
 from demo_controller.settings import Settings
 from demo_controller.store import Store
@@ -23,26 +20,13 @@ from demo_controller.store import Store
 logger = logging.getLogger(__name__)
 
 
-class _ProxyCookieJar(CookieJar):
-    """Workload cookies belong to browsers, never to the shared proxy client."""
-
-    def set_cookie(self, cookie: Cookie) -> None:
-        # HTTPX extracts response cookies even when sending a raw Request.
-        # Do not retain visitor sessions in controller memory.
-        return
-
-
 def create_app(
     settings: Settings,
     store: Store,
     authenticator: Authenticator,
     reconciliation: ReconciliationLoop,
-    proxy_client: httpx.AsyncClient | None = None,
 ) -> FastAPI:
     task: asyncio.Task[None] | None = None
-    client = proxy_client or httpx.AsyncClient(
-        timeout=settings.proxy_timeout_seconds, cookies=_ProxyCookieJar()
-    )
 
     def report_loop_exit(completed: asyncio.Task[None]) -> None:
         if not completed.cancelled() and (error := completed.exception()) is not None:
@@ -57,18 +41,11 @@ def create_app(
             yield
         finally:
             reconciliation.stop()
-            try:
-                # Loop failures are reported by the callback and /statusz. Still
-                # release clients when an already-failed task is awaited at shutdown.
-                await asyncio.gather(task, return_exceptions=True)
-            finally:
-                if proxy_client is None:
-                    await client.aclose()
+            # Loop failures are reported by the callback and /statusz.
+            await asyncio.gather(task, return_exceptions=True)
 
-    # FastAPI's auto-registered /docs, /redoc, and /openapi.json would match
-    # before the catch-all proxy route and hijack the same paths on every demo
-    # hostname (and leak the API schema publicly). The controller is an
-    # HMAC-authenticated machine API: disable the interactive docs entirely.
+    # Caddy routes only the controller hostname here; demo traffic never
+    # enters FastAPI, including paths such as /docs, /readyz, and /api/v1/.
     app = FastAPI(
         title="Canonical demos controller",
         version="1.0",
@@ -103,7 +80,8 @@ def create_app(
 
     @app.get("/readyz")
     async def ready() -> dict[str, str]:
-        # Ingress must keep serving retained demos during control-plane failures.
+        # API readiness only; Caddy answers ingress readiness independently
+        # so a database/control-plane failure does not withdraw retained demos.
         try:
             store.list_reconcilable()
         except sqlite3.Error as error:
@@ -201,55 +179,5 @@ def create_app(
         if not record:
             raise HTTPException(404, "demo not found")
         return store.status(record).model_dump()
-
-    @app.api_route(
-        "/{path:path}", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
-    )
-    async def proxy(path: str, request: Request) -> Response:
-        requested_host = request.headers.get("host", "").split(":", 1)[0].lower().rstrip(".")
-        # Demo hostnames serve browsers, not API clients: unknown or inactive
-        # hostnames must return an empty 404 rather than a JSON error detail.
-        if not requested_host.endswith(f".{settings.hostname_suffix}"):
-            return Response(status_code=404)
-        record = store.get_ready_by_hostname(requested_host)
-        if not record or not record.port:
-            return Response(status_code=404)
-        service = resource_name(record.repository, record.pr)
-        target = f"http://{service}.{settings.namespace}.svc.cluster.local:{record.port}/{path}"
-        if request.url.query:
-            target += f"?{request.url.query}"
-        headers = {
-            key: value
-            for key, value in request.headers.items()
-            if key.lower() not in {"host", "content-length", "connection"}
-        }
-        # Upstream must see the public hostname as the actual Host header.
-        # Applications that do not trust X-Forwarded-Host (e.g. snapcraft.io,
-        # whose ProxyFix uses x_host=0) build absolute redirect URLs such as
-        # OpenID return URLs from the Host header, which would otherwise be
-        # the internal ClusterIP service DNS name and break the login flow.
-        headers["host"] = requested_host
-        headers["x-forwarded-host"] = requested_host
-        try:
-            # Build a raw request, not client.request()/build_request(): those
-            # merge the shared client's cookie jar into anonymous requests.
-            # Only this browser's Cookie header may reach the workload, even
-            # when a caller supplies a client with pre-existing cookies.
-            upstream_request = httpx.Request(
-                request.method, target, content=await request.body(), headers=headers
-            )
-            upstream = await client.send(upstream_request, follow_redirects=False)
-        except httpx.HTTPError as error:
-            raise HTTPException(503, "demo backend unavailable") from error
-        response = Response(content=upstream.content, status_code=upstream.status_code)
-        # Set-Cookie cannot be comma-joined: each cookie must remain a separate
-        # header, including cookies that clear an existing login session.
-        response.raw_headers = [
-            (key, value)
-            for key, value in upstream.headers.raw
-            if key.lower() not in {b"content-length", b"connection", b"transfer-encoding"}
-        ]
-        response.headers["content-length"] = str(len(upstream.content))
-        return response
 
     return app

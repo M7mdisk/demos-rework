@@ -10,6 +10,8 @@ Accepted decisions:
 - [ADR 0006: Persist desired state in SQLite and reconcile](0006-sqlite-desired-state.md)
 - [ADR 0007: Propagate egress proxy settings and bypass the Kubernetes API](0007-egress-proxy-and-kubernetes-bypass.md)
 
+- [ADR 0008: Embed Caddy for workload HTTP forwarding](0008-embedded-caddy.md)
+
 ADRs describe decisions and consequences, not necessarily current deployment
 state. Supersede an ADR rather than silently rewriting its decision.
 

@@ -26,7 +26,11 @@ def healthy_status():
         "status": "ok",
         "database": "ok",
         "reconciliation": {"state": "running"},
-        "dependencies": {"vault": {"status": "ok"}, "kubernetes": {"status": "ok"}},
+        "dependencies": {
+            "vault": {"status": "ok"},
+            "kubernetes": {"status": "ok"},
+            "caddy": {"status": "ok"},
+        },
     }
 
 
@@ -87,11 +91,20 @@ def test_configures_workload_and_publishes_api_and_wildcard_route(
         harness.container_pebble_ready("controller")
     plan = harness.get_container_pebble_plan("controller")
     assert plan.services["fastapi"].environment["DATABASE_PATH"] == "/data/controller.db"
-    assert plan.services["fastapi"].environment["UVICORN_HOST"] == "0.0.0.0"
-    assert plan.services["fastapi"].environment["UVICORN_PORT"] == "8080"
+    assert plan.services["fastapi"].environment["UVICORN_HOST"] == "127.0.0.1"
+    assert plan.services["fastapi"].environment["UVICORN_PORT"] == "8081"
     assert "MAX_DEMO_LIFETIME" not in plan.services["fastapi"].environment
     assert plan.services["fastapi"].environment["HTTPS_PROXY"] == "http://egress.internal:3128"
-    assert plan.services["fastapi"].environment["NO_PROXY"] == "localhost,.svc,10.86.0.1"
+    assert plan.services["fastapi"].environment["NO_PROXY"] == "localhost,127.0.0.1,.svc,10.86.0.1"
+    assert plan.services["caddy"].command == "/bin/python3 -m demo_controller.routing"
+    assert plan.services["caddy"].environment == {
+        "API_HOSTNAME": "demos-controller.canonical.com",
+        "KUBERNETES_NAMESPACE": harness.model.name,
+        "HOSTNAME_SUFFIX": "demos.canonical.com",
+        "XDG_CONFIG_HOME": "/data",
+        "XDG_DATA_HOME": "/data",
+    }
+    assert plan.checks["ready"].http["url"] == "http://localhost:8080/readyz"
     data = harness.get_relation_data(relation_id, harness.model.app.name)
     assert {key: json.loads(value) for key, value in data.items()} == {
         "service": "demos-controller-nodeport",
@@ -168,6 +181,7 @@ def test_cleanup_deletes_only_the_owned_nodeport() -> None:
     [
         ("vault", ops.WaitingStatus, "Vault reconciliation degraded"),
         ("kubernetes", ops.WaitingStatus, "Kubernetes reconciliation degraded"),
+        ("caddy", ops.WaitingStatus, "Caddy route synchronization degraded"),
         ("database", ops.WaitingStatus, "state database unavailable"),
         ("reconciliation", ops.MaintenanceStatus, "reconciliation loop stopped"),
         ("demo", ops.WaitingStatus, "demo reconciliation degraded"),
@@ -177,12 +191,20 @@ def test_degraded_diagnostics_are_visible_without_changing_ingress(failure, stat
     harness = make_harness(nodeport_client())
     harness.set_leader(True)
     relation_id = harness.add_relation("haproxy-route", "haproxy")
-    with patch.object(DemosControllerCharm, "_environment", return_value={"configured": "yes"}):
+    with patch.object(
+        DemosControllerCharm,
+        "_environment",
+        return_value={
+            "API_HOSTNAME": "api.demos.example",
+            "KUBERNETES_NAMESPACE": "testing",
+            "HOSTNAME_SUFFIX": "demos.example",
+        },
+    ):
         harness.container_pebble_ready("controller")
         previous_route = dict(harness.get_relation_data(relation_id, harness.model.app.name))
         health = healthy_status()
         health["status"] = "degraded"
-        if failure in {"vault", "kubernetes"}:
+        if failure in {"vault", "kubernetes", "caddy"}:
             health["dependencies"][failure]["status"] = "error"
         elif failure == "database":
             health["database"] = "error"

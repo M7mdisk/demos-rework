@@ -52,8 +52,9 @@ Vault records.
    never stores application secret values there.
 6. The controller owns plain Kubernetes Deployments, Services, ConfigMaps, and
    Secrets. Demo workloads are not Juju applications.
-7. HAProxy has one API hostname and one wildcard demo route. The controller
-   reverse-proxies each exact demo hostname to its ClusterIP Service.
+7. HAProxy has one API hostname and one wildcard demo route. Embedded Caddy
+   reverse-proxies exact demo hostnames to their ClusterIP Services; FastAPI
+   manages routing configuration but never handles workload HTTP traffic.
 8. Closing or merging a pull request requests resource deletion and attempts
    safe deletion of the single-tag PR image version.
 9. Demo lifetime is fixed at three days. It is not configurable through Vault,
@@ -121,7 +122,9 @@ ignored and must not be committed.
   the exact failure class.
 - Rate limiting is in-memory per controller process; replay protection and
   desired state are persistent in SQLite.
-- The reverse proxy buffers request and response bodies. It is suitable for
-  review applications, not large streaming or websocket workloads.
+- Caddy owns workload HTTP forwarding, cookies, streaming, and WebSockets.
+  Keep administration bound to loopback; never add workload forwarding back
+  into FastAPI. Its autosaved configuration on `/data` retains working routes
+  independently of Python/Vault availability.
 - Historical production names and verification evidence are recorded in
   `docs/history.md`. Treat them as observations, not guaranteed current state.

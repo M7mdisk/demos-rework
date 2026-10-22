@@ -12,8 +12,9 @@ per-PR Juju deployment flow with Canonical tooling:
 - The controller creates short-lived Kubernetes resources for pull requests.
 - An existing HAProxy deployment exposes both the API and demo hostnames.
 
-The controller is a control plane and reverse proxy. The demo workloads it
-creates are Kubernetes resources, not Juju applications.
+The charm embeds a Python control plane and a Caddy reverse proxy. The demo
+workloads it creates are Kubernetes resources, not Juju applications. Browser
+traffic never passes through Python.
 
 ## Components
 
@@ -34,7 +35,13 @@ HAProxy route
   *.demos.canonical.com
        |
        v
-Controller NodePort
+Controller NodePort :8080
+       |
+       v
+Embedded Caddy
+  - exact demo hosts -> ClusterIP Services
+  - API hostname -> FastAPI on 127.0.0.1:8081
+  - unknown hosts -> empty 404
        |
        v
 FastAPI controller
@@ -43,7 +50,7 @@ FastAPI controller
   - SQLite desired state
   - Vault AppRole/KV client
   - reconciliation loop
-  - host-based reverse proxy
+  - Caddy route publication via loopback admin API
        |
        +--------------------+
        |                    |
@@ -78,7 +85,9 @@ and secrets          ConfigMap / Secret
 10. The controller validates configuration and the optional Vault-authorized
     image namespace.
 11. It applies a Deployment, ClusterIP Service, and optional ConfigMap/Secret.
-12. The workflow polls signed status requests until the demo is ready or fails.
+12. Once the Deployment is ready, the controller atomically publishes its
+    Caddy route before reporting ready. The workflow polls signed status
+    requests until the demo is ready or fails.
 13. The workflow creates or updates one persistent pull-request comment.
 
 ## Destroy flow
@@ -86,7 +95,8 @@ and secrets          ConfigMap / Secret
 1. Pull-request close/merge invokes `.github/workflows/demo-cleanup.yaml`.
 2. The workflow signs `POST /api/v1/destroy`.
 3. SQLite changes the desired state to absent.
-4. The reconciler deletes the Deployment, Service, ConfigMap, and Secret.
+4. The reconciler withdraws the Caddy route, then deletes the Deployment,
+   Service, ConfigMap, and Secret. Failed withdrawal defers backend deletion.
 5. The record is removed after Kubernetes deletion succeeds.
 6. The workflow attempts to delete only GHCR versions that have exactly one tag
    matching `pr-<number>-sha-*`. Multi-tag versions are deliberately retained.
@@ -112,14 +122,24 @@ webteam-juju-demos-testing-pr-20.demos.canonical.com
 
 The charm publishes one exact API hostname and one wildcard hostname through a
 single `haproxy-route` relation. HAProxy sends all matching requests to the
-controller NodePort. The controller then:
+controller NodePort, where Caddy:
 
-1. reads the incoming `Host`;
-2. requires it to end with the configured suffix;
-3. finds an active persisted record for the exact hostname;
-4. resolves the controller-owned ClusterIP Service;
-5. proxies the request inside the model, sending the public hostname as the
-   upstream `Host` header (and `X-Forwarded-Host`).
+1. matches the controller API hostname and forwards it to loopback FastAPI;
+2. matches each explicit demo hostname and forwards it to the recorded Service;
+3. returns an empty 404 for every unknown hostname.
+
+The reconciler restores routes from SQLite before consulting Vault and publishes
+updates through Caddy's loopback-only `POST /load` API. Failed configuration
+updates leave the last accepted configuration running. Caddy autosaves that
+configuration to `/data/caddy/autosave.json` and starts with `--resume`, so
+restarting FastAPI or Caddy does not depend on Vault for route restoration.
+No credentials or application secret values are included in routing config.
+
+Caddy retains the public `Host`, sets `X-Forwarded-Host`, and explicitly sets
+`X-Forwarded-Proto: https` because external HAProxy terminates HTTPS. This
+requires HTTPS-only public ingress; browser-supplied forwarding headers are not
+trusted to choose the scheme. Cookies, redirects, compression, streaming,
+WebSockets, and hop-by-hop headers are handled by Caddy, not Python.
 
 The upstream `Host` header must stay the public hostname, not the ClusterIP
 service DNS name: demo applications that do not trust `X-Forwarded-Host`
@@ -156,6 +176,8 @@ Important failure behavior:
   claim that the backend is available; the error message makes this explicit.
 - A failed replacement does not deliberately delete the previous Kubernetes
   resources.
+- A route publication failure does not mark a new demo ready or replace the
+  last known ready port. A not-yet-ready Deployment never gains a new route.
 - A deletion failure retains a failed record so reconciliation can retry.
 - Expired records are treated as desired absent.
 - Vault transport failures discard the owned HTTP client/pool. Only pre-send
@@ -173,7 +195,8 @@ Important failure behavior:
 | Repository to image | Exact lowercase repository namespace and immutable digest |
 | Vault authorization | AppRole policy plus optional `image_namespace` |
 | Controller to Kubernetes | Trusted charm and ownership labels |
-| Internet to demo | HAProxy wildcard plus exact host lookup in SQLite |
+| Internet to demo | HAProxy wildcard plus exact host routes in Caddy |
+| Controller to Caddy | Loopback-only admin API, no egress proxy; durable atomic configuration |
 | Demo pod | Non-root policy, runtime-default seccomp, no privilege escalation, all capabilities dropped |
 
 See the ADRs for why these boundaries were selected.

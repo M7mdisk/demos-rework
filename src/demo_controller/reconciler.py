@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import replace
 
 from demo_controller.kubernetes import KubernetesReconciler, render_resources
+from demo_controller.routing import CaddyRoutes
 from demo_controller.store import DemoRecord, Store
 from demo_controller.vault import VaultClient, VaultError
 
@@ -21,6 +23,7 @@ class ReconciliationLoop:
         owner: str,
         image_registry: str,
         interval: float,
+        routes: CaddyRoutes | None = None,
     ):
         self.store = store
         self.vault = vault
@@ -29,11 +32,12 @@ class ReconciliationLoop:
         self.owner = owner
         self.image_registry = image_registry
         self.interval = interval
+        self.routes = routes
         self._stopping = asyncio.Event()
         self.last_completed_at: int | None = None
         self._dependencies: dict[str, dict[str, str | int | None]] = {
             name: {"status": "unknown", "checked_at": None, "error": None}
-            for name in ("vault", "kubernetes")
+            for name in (("vault", "kubernetes", "caddy") if routes else ("vault", "kubernetes"))
         }
 
     def health(self) -> dict[str, dict[str, str | int | None]]:
@@ -48,9 +52,33 @@ class ReconciliationLoop:
             "error": error,
         }
 
+    async def _sync_routes(self, candidate: DemoRecord | None = None) -> bool:
+        if self.routes is None:
+            return True
+        try:
+            records = self.store.list_routable()
+            if candidate is not None:
+                records = [
+                    record
+                    for record in records
+                    if (record.repository, record.pr) != (candidate.repository, candidate.pr)
+                ]
+                records.append(candidate)
+            await self.routes.sync(records)
+            self._observe("caddy")
+            return True
+        except Exception as error:  # noqa: BLE001 -- retain routes on any sync failure
+            # Do not log response bodies or exception messages from admin calls.
+            self._observe("caddy", type(error).__name__)
+            logger.warning("Caddy route synchronization failed (%s)", type(error).__name__)
+            return False
+
     async def run(self) -> None:
         try:
             while not self._stopping.is_set():
+                # Restore retained routes before any Vault lookup. Re-send even
+                # unchanged configs so a restarted Caddy is also reconciled.
+                await self._sync_routes()
                 for record in self.store.list_reconcilable():
                     await self.reconcile(record)
                 self.last_completed_at = int(time.time())
@@ -59,7 +87,11 @@ class ReconciliationLoop:
                 except TimeoutError:
                     pass
         finally:
-            await self.vault.aclose()
+            try:
+                await self.vault.aclose()
+            finally:
+                if self.routes is not None:
+                    await self.routes.aclose()
 
     def stop(self) -> None:
         self._stopping.set()
@@ -67,6 +99,13 @@ class ReconciliationLoop:
     async def reconcile(self, record: DemoRecord) -> None:
         if not record.desired_present or record.expires_at <= int(time.time()):
             self.store.update_state(record.repository, record.pr, "deleting", "deleting resources")
+            # Withdraw the route before deleting its backend. If publication
+            # fails, retain the backend and retry rather than leave a stale route.
+            if not await self._sync_routes():
+                self.store.update_state(
+                    record.repository, record.pr, "deleting", "waiting for route withdrawal"
+                )
+                return
             try:
                 await asyncio.to_thread(self.kubernetes.delete, record.repository, record.pr)
                 self._observe("kubernetes")
@@ -99,13 +138,20 @@ class ReconciliationLoop:
                 self._observe("kubernetes", type(error).__name__)
                 raise
             self._observe("kubernetes")
+            if ready and not await self._sync_routes(
+                replace(record, state="ready", port=project.config.port)
+            ):
+                self.store.update_state(
+                    record.repository, record.pr, "failed", "Caddy route publication failed"
+                )
+                return
             self.store.update_state(
                 record.repository,
                 record.pr,
                 "ready" if ready else "reconciling",
                 "deployment is ready" if ready else "waiting for deployment readiness",
                 vault_version=project.version,
-                port=project.config.port,
+                port=project.config.port if ready else None,
             )
         except VaultError as error:
             self._observe("vault", error.category)
