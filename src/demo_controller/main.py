@@ -9,6 +9,7 @@ from demo_controller.api import create_app
 from demo_controller.auth import Authenticator
 from demo_controller.kubernetes import KubernetesReconciler
 from demo_controller.reconciler import ReconciliationLoop
+from demo_controller.routing import CaddyRoutes
 from demo_controller.settings import Settings
 from demo_controller.store import Store
 from demo_controller.vault import VaultClient
@@ -42,6 +43,7 @@ def build_app():
         settings.controller_owner,
         settings.image_registry,
         settings.reconcile_interval_seconds,
+        routes=CaddyRoutes(settings.api_hostname, settings.namespace, settings.hostname_suffix),
     )
     return create_app(settings, store, authenticator, reconciliation)
 
@@ -51,4 +53,4 @@ def run() -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    uvicorn.run(build_app(), host="0.0.0.0", port=8080, proxy_headers=True)
+    uvicorn.run(build_app(), host="127.0.0.1", port=8081, proxy_headers=True)

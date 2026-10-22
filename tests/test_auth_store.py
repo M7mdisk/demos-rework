@@ -133,7 +133,7 @@ def test_deploy_update_preserves_the_active_route_until_reconciled(tmp_path: Pat
     assert pending.state == "pending"
     assert pending.port == 8000
     assert pending.vault_version == 2
-    assert store.get_ready_by_hostname(store.status(pending).hostname) == pending
+    assert store.list_routable() == [pending]
 
 
 def test_deploy_api_accepts_a_signed_request(tmp_path: Path) -> None:
@@ -164,7 +164,6 @@ def test_deploy_api_accepts_a_signed_request(tmp_path: Path) -> None:
         request_max_bytes=65536,
         signature_max_age_seconds=300,
         rate_limit_per_minute=60,
-        proxy_timeout_seconds=3,
     )
     app = create_app(settings, store, auth, ReconciliationStub())  # type: ignore[arg-type]
     body = (

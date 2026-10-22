@@ -8,14 +8,12 @@ import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-import httpx
 import pytest
 from fastapi.testclient import TestClient
 
 from demo_controller.api import create_app
 from demo_controller.auth import Authenticator
 from demo_controller.models import DeployRequest, ProjectConfig
-from demo_controller.naming import resource_name
 from demo_controller.reconciler import ReconciliationLoop
 from demo_controller.settings import Settings
 from demo_controller.store import Store
@@ -50,7 +48,6 @@ def controller(tmp_path: Path):
         request_max_bytes=65536,
         signature_max_age_seconds=300,
         rate_limit_per_minute=60,
-        proxy_timeout_seconds=3,
     )
     auth = Authenticator(settings.hmac_credentials, store, 300, 60)
     app = create_app(settings, store, auth, loop)
@@ -174,115 +171,11 @@ async def test_cancelling_reconciliation_closes_vault_client(controller) -> None
     vault.aclose.assert_awaited_once()
 
 
-async def test_proxy_client_owned_by_caller_is_not_closed(controller) -> None:
-    _, store, loop, _, _ = controller
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda _: httpx.Response(200))
-    ) as proxy:
-        auth = Authenticator({}, store, 300, 60)
-        application = create_app(MagicMock(spec=Settings), store, auth, loop, proxy_client=proxy)
-        with TestClient(application) as client:
-            assert client.get("/readyz").status_code == 200
-        assert not proxy.is_closed
-
-
-async def test_proxy_sends_public_hostname_as_upstream_host_header(controller) -> None:
-    """Upstream must receive the public hostname as its actual Host header.
-
-    Applications that do not trust X-Forwarded-Host (snapcraft.io's ProxyFix
-    runs with x_host=0) build absolute redirect URLs, such as the OpenID
-    return URL, from the Host header. Without this the upstream would see the
-    ClusterIP service DNS name and redirect browsers to an unreachable
-    cluster-internal URL after login.
-    """
-    _, store, loop, _, _ = controller
-    add_demo(store)
-    store.update_state("canonical/example", 1, "ready", "", port=8000)
-    captured: list[httpx.Request] = []
-
-    def upstream(request: httpx.Request) -> httpx.Response:
-        captured.append(request)
-        return httpx.Response(302, headers={"Location": "/login?next=/snaps"})
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as proxy:
-        settings = MagicMock(spec=Settings)
-        settings.hostname_suffix = "demos.example"
-        settings.namespace = "testing"
-        settings.proxy_timeout_seconds = 3
-        auth = Authenticator({}, store, 300, 60)
-        application = create_app(settings, store, auth, loop, proxy_client=proxy)
-        with TestClient(application) as client:
-            response = client.get(
-                "/login",
-                headers={"Host": "example-pr-1.demos.example", "X-Forwarded-Proto": "https"},
-                follow_redirects=False,
-            )
-    assert response.status_code == 302
-    assert response.headers["location"] == "/login?next=/snaps"
-    (request,) = captured
-    assert request.url.host == f"{resource_name('canonical/example', 1)}.testing.svc.cluster.local"
-    assert request.headers["host"] == "example-pr-1.demos.example"
-    assert request.headers["x-forwarded-host"] == "example-pr-1.demos.example"
-    assert request.headers["x-forwarded-proto"] == "https"
-
-
-async def test_controller_docs_paths_are_proxied_to_the_demo(controller) -> None:
-    """Built-in /docs, /redoc, and /openapi.json must not shadow demo paths.
-
-    FastAPI registers those routes before the catch-all proxy, so without
-    disabling them a demo's own /docs page would be replaced by the
-    controller's Swagger UI and the API schema would leak publicly.
-    """
-    _, store, loop, _, _ = controller
-    add_demo(store)
-    store.update_state("canonical/example", 1, "ready", "", port=8000)
-    proxied: list[str] = []
-
-    def upstream(request: httpx.Request) -> httpx.Response:
-        proxied.append(request.url.path)
-        return httpx.Response(200, text="workload docs")
-
-    async with httpx.AsyncClient(transport=httpx.MockTransport(upstream)) as proxy:
-        settings = MagicMock(spec=Settings)
-        settings.hostname_suffix = "demos.example"
-        settings.namespace = "testing"
-        settings.proxy_timeout_seconds = 3
-        auth = Authenticator({}, store, 300, 60)
-        application = create_app(settings, store, auth, loop, proxy_client=proxy)
-        with TestClient(application) as client:
-            for path in ("/docs", "/redoc", "/openapi.json"):
-                response = client.get(path, headers={"Host": "example-pr-1.demos.example"})
-                assert response.status_code == 200
-                assert response.text == "workload docs"
-    assert proxied == ["/docs", "/redoc", "/openapi.json"]
-
-
-async def test_unknown_demo_hostname_returns_empty_404(controller) -> None:
-    """Browsers hitting an unknown or inactive demo hostname get an empty 404.
-
-    The wildcard route serves end users, not API clients, so it must not leak
-    controller error details as a JSON body. A 200 from the mock upstream
-    would prove the request was wrongly forwarded.
-    """
-    _, store, loop, vault, _ = controller
-    add_demo(store)
-    # Keep the demo out of the ready state so the hostname stays unroutable.
-    vault.project.side_effect = VaultError("vault unavailable")
-    async with httpx.AsyncClient(
-        transport=httpx.MockTransport(lambda _: httpx.Response(200))
-    ) as proxy:
-        settings = MagicMock(spec=Settings)
-        settings.hostname_suffix = "demos.example"
-        settings.namespace = "testing"
-        settings.proxy_timeout_seconds = 3
-        auth = Authenticator({}, store, 300, 60)
-        application = create_app(settings, store, auth, loop, proxy_client=proxy)
-        with TestClient(application) as client:
-            for host in ("asdf.demos.example", "example-pr-1.demos.example"):
-                response = client.get("/", headers={"Host": host})
-                assert response.status_code == 404
-                assert response.content == b""
-                assert "content-type" not in response.headers
+def test_api_does_not_forward_workload_requests(controller) -> None:
+    app, _, _, _, _ = controller
+    with TestClient(app) as client:
+        for path in ("/", "/login", "/docs", "/redoc", "/openapi.json"):
+            assert client.get(path).status_code == 404
 
 
 @pytest.mark.parametrize(

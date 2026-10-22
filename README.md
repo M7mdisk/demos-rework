@@ -20,9 +20,11 @@ commit metadata, and an immutable repository-scoped image digest.
 
 ## Controller API
 
-The workload serves the signed deployment API on port 8080, persists non-secret
-desired state in SQLite, resolves project configuration through Vault AppRole
-and KV v2, reconciles resources with Lightkube, and proxies active demo hosts.
+Embedded Caddy listens on port 8080 and routes the controller hostname to
+FastAPI on `127.0.0.1:8081`, and each ready demo hostname directly to its
+ClusterIP Service. FastAPI persists non-secret desired state in SQLite, resolves
+project configuration through Vault AppRole and KV v2, and reconciles resources
+and Caddy routes. It never forwards workload HTTP requests.
 
 Requests provide `X-Demos-Repository`, `X-Demos-Timestamp`, `X-Demos-Nonce`,
 and `X-Demos-Signature`. The signature is lowercase hex HMAC-SHA256 over:

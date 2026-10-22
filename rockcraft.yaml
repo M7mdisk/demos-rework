@@ -11,3 +11,8 @@ platforms:
   arm64:
 extensions:
   - fastapi-framework
+parts:
+  caddy:
+    plugin: nil
+    stage-packages:
+      - caddy

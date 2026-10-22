@@ -216,21 +216,17 @@ class Store:
             ).fetchone()
         return self._record(row) if row else None
 
-    def get_ready_by_hostname(self, requested_hostname: str) -> DemoRecord | None:
-        with self._connection() as connection:
-            rows = connection.execute(
-                """
-                SELECT * FROM demos
-                WHERE desired_present=1
-                  AND port IS NOT NULL
-                  AND state IN ('pending','reconciling','ready','failed')
-                """
-            ).fetchall()
-        for row in rows:
-            record = self._record(row)
-            if hostname(record.repository, record.pr, self.hostname_suffix) == requested_hostname:
-                return record
-        return None
+    def list_routable(self) -> list[DemoRecord]:
+        # A non-null port records a previously ready backend. Keep that route
+        # while its replacement is pending or reconciliation is degraded.
+        return [
+            record
+            for record in self.list_reconcilable()
+            if record.desired_present
+            and record.port is not None
+            and record.state != "deleting"
+            and record.expires_at > int(time.time())
+        ]
 
     def update_state(
         self,

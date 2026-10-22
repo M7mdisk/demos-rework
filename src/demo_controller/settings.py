@@ -24,7 +24,7 @@ class Settings:
     request_max_bytes: int
     signature_max_age_seconds: int
     rate_limit_per_minute: int
-    proxy_timeout_seconds: float
+    api_hostname: str = "demos-controller.canonical.com"
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -50,5 +50,5 @@ class Settings:
             request_max_bytes=int(os.getenv("REQUEST_MAX_BYTES", "65536")),
             signature_max_age_seconds=int(os.getenv("SIGNATURE_MAX_AGE", "300")),
             rate_limit_per_minute=int(os.getenv("RATE_LIMIT_PER_MINUTE", "60")),
-            proxy_timeout_seconds=float(os.getenv("PROXY_TIMEOUT", "30")),
+            api_hostname=os.getenv("API_HOSTNAME", "demos-controller.canonical.com").strip("."),
         )
