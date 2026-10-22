@@ -7,6 +7,7 @@ import logging
 import sqlite3
 from collections import Counter
 from collections.abc import AsyncIterator
+from http.cookiejar import Cookie, CookieJar
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
@@ -22,6 +23,15 @@ from demo_controller.store import Store
 logger = logging.getLogger(__name__)
 
 
+class _ProxyCookieJar(CookieJar):
+    """Workload cookies belong to browsers, never to the shared proxy client."""
+
+    def set_cookie(self, cookie: Cookie) -> None:
+        # HTTPX extracts response cookies even when sending a raw Request.
+        # Do not retain visitor sessions in controller memory.
+        return
+
+
 def create_app(
     settings: Settings,
     store: Store,
@@ -30,7 +40,9 @@ def create_app(
     proxy_client: httpx.AsyncClient | None = None,
 ) -> FastAPI:
     task: asyncio.Task[None] | None = None
-    client = proxy_client or httpx.AsyncClient(timeout=settings.proxy_timeout_seconds)
+    client = proxy_client or httpx.AsyncClient(
+        timeout=settings.proxy_timeout_seconds, cookies=_ProxyCookieJar()
+    )
 
     def report_loop_exit(completed: asyncio.Task[None]) -> None:
         if not completed.cancelled() and (error := completed.exception()) is not None:
@@ -219,25 +231,25 @@ def create_app(
         headers["host"] = requested_host
         headers["x-forwarded-host"] = requested_host
         try:
-            upstream = await client.request(
-                request.method,
-                target,
-                content=await request.body(),
-                headers=headers,
-                follow_redirects=False,
+            # Build a raw request, not client.request()/build_request(): those
+            # merge the shared client's cookie jar into anonymous requests.
+            # Only this browser's Cookie header may reach the workload, even
+            # when a caller supplies a client with pre-existing cookies.
+            upstream_request = httpx.Request(
+                request.method, target, content=await request.body(), headers=headers
             )
+            upstream = await client.send(upstream_request, follow_redirects=False)
         except httpx.HTTPError as error:
             raise HTTPException(503, "demo backend unavailable") from error
-        response_headers = {
-            key: value
-            for key, value in upstream.headers.items()
-            if key.lower() not in {"content-length", "connection", "transfer-encoding"}
-        }
-        return Response(
-            content=upstream.content,
-            status_code=upstream.status_code,
-            headers=response_headers,
-            media_type=upstream.headers.get("content-type"),
-        )
+        response = Response(content=upstream.content, status_code=upstream.status_code)
+        # Set-Cookie cannot be comma-joined: each cookie must remain a separate
+        # header, including cookies that clear an existing login session.
+        response.raw_headers = [
+            (key, value)
+            for key, value in upstream.headers.raw
+            if key.lower() not in {b"content-length", b"connection", b"transfer-encoding"}
+        ]
+        response.headers["content-length"] = str(len(upstream.content))
+        return response
 
     return app
